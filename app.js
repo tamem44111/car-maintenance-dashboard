@@ -306,6 +306,13 @@ const App = {
             }).join('');
         } else { healthEl.innerHTML=''; }
 
+        // Quick actions & analytics
+        if (typeof Features !== 'undefined') {
+            Features.renderQuickActions();
+            Features.renderAnalytics(cid);
+            Features.scheduleNotifications();
+        }
+
         // Recent services
         const recentEl=document.getElementById('recent-services');
         const recent=services.sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
@@ -346,6 +353,16 @@ const App = {
                     return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${doc.label}</span><span class="rec-detail">Expires ${doc.date}</span></div><div class="rec-status">${sb}</div></div>`;
                 }).join('')}</div>`;
             }
+            // Tire info
+            let tireHTML='';
+            if(c.tires&&c.tires.brand){
+                tireHTML=`<div class="tire-info"><div class="tire-info-title">Tires</div>
+                    <div class="tire-detail"><span>Brand / Size</span><span>${c.tires.brand} ${c.tires.size||''}</span></div>
+                    ${c.tires.installedDate?`<div class="tire-detail"><span>Installed</span><span>${c.tires.installedDate}${c.tires.installedMileage?' at '+parseInt(c.tires.installedMileage).toLocaleString()+' km':''}</span></div>`:''}
+                    ${c.tires.warrantyKm?`<div class="tire-detail"><span>Warranty</span><span>${parseInt(c.tires.warrantyKm).toLocaleString()} km</span></div>`:''}
+                    <div class="tire-detail"><span>Rotation</span><span>${c.tires.pattern||'cross'}</span></div>
+                </div>`;
+            }
             return `<div class="car-card">
                 <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}">${h.score}% ${h.label}</span></div>
                 <div class="car-card-details">
@@ -354,10 +371,11 @@ const App = {
                     <div class="car-detail"><span>Services</span><span>${sc}</span></div>
                     <div class="car-detail"><span>Total Spent</span><span>${tc.toFixed(0)} SAR</span></div>
                 </div>
-                ${docsHTML}${recsHTML}
+                ${docsHTML}${recsHTML}${tireHTML}
                 <div class="car-card-actions">
                     <button class="btn btn-secondary btn-sm" onclick="App.openCarModal(Storage.getCars().find(c=>c.id==='${c.id}'))">Edit</button>
                     ${hasRecs?`<button class="btn btn-secondary btn-sm" onclick="App.openCustomRecModal('${c.id}')">+ Custom</button>`:''}
+                    <button class="btn btn-secondary btn-sm" onclick="Features.openTireModal('${c.id}')">Tires</button>
                     <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this car and all records?')){Storage.deleteCar('${c.id}');App.renderPage(App.currentPage);}">Delete</button>
                 </div>
             </div>`;

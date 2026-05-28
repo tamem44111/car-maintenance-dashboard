@@ -145,12 +145,23 @@ const Recommendations = {
 
     getEffective(car, serviceType) {
         const custom = this.getCustom();
+        let rec = null;
         if (custom[car.id] && custom[car.id][serviceType]) {
-            return { ...custom[car.id][serviceType], source: 'custom' };
+            rec = { ...custom[car.id][serviceType], source: 'custom' };
+        } else {
+            const mfr = this.getForService(car.make, car.model, serviceType);
+            if (mfr) rec = { ...mfr, source: 'manufacturer' };
         }
-        const rec = this.getForService(car.make, car.model, serviceType);
-        if (rec) return { ...rec, source: 'manufacturer' };
-        return null;
+        // Apply climate multiplier (severe heat = 20% shorter intervals)
+        if (rec && typeof Features !== 'undefined') {
+            const mult = Features.getClimateMultiplier();
+            if (mult !== 1.0) {
+                rec.km = Math.round(rec.km * mult);
+                if (rec.months) rec.months = Math.max(1, Math.round(rec.months * mult));
+                if (rec.source === 'manufacturer') rec.note += ' (climate-adjusted)';
+            }
+        }
+        return rec;
     },
 
     getAllForCar(car) {
