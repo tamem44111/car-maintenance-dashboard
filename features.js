@@ -63,7 +63,7 @@ const Features = {
         services.forEach(s => { byType[s.type] = (byType[s.type] || 0) + (parseFloat(s.cost) || 0); });
         if (fuelTotal > 0) byType['Fuel'] = fuelTotal;
 
-        const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316', '#6366f1', '#84cc16'];
+        const colors = ['#4f6ef7', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4f46e5', '#65a30d'];
         const entries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
         const total = entries.reduce((s, e) => s + e[1], 0) || 1;
 

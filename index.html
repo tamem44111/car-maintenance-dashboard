@@ -9,6 +9,9 @@
     <link rel="manifest" href="manifest.json">
     <link rel="apple-touch-icon" href="icon-192.png">
     <meta name="theme-color" content="#3b82f6">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="styles.css">
 </head>
 <body>
@@ -16,12 +19,13 @@
         <nav class="sidebar">
             <div class="sidebar-header">
                 <div class="logo">
-                    <svg class="logo-svg" width="28" height="28" viewBox="0 0 28 28" fill="none">
-                        <rect width="28" height="28" rx="8" fill="#3b82f6"/>
-                        <path d="M8 18l2-6h8l2 6" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                        <circle cx="10" cy="18" r="2" fill="#fff"/>
-                        <circle cx="18" cy="18" r="2" fill="#fff"/>
-                        <path d="M10 12l1-3h6l1 3" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
+                    <svg class="logo-svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
+                        <rect width="32" height="32" rx="10" fill="url(#logo-grad)"/>
+                        <defs><linearGradient id="logo-grad" x1="0" y1="0" x2="32" y2="32"><stop stop-color="#6382f7"/><stop offset="1" stop-color="#4f6ef7"/></linearGradient></defs>
+                        <path d="M9 20l2.5-7h9l2.5 7" stroke="#fff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                        <circle cx="11.5" cy="20" r="1.8" fill="#fff"/>
+                        <circle cx="20.5" cy="20" r="1.8" fill="#fff"/>
+                        <path d="M11.5 13l1.2-3.5h6.6l1.2 3.5" stroke="#fff" stroke-width="1.5" stroke-linecap="round"/>
                     </svg>
                     <h1>AutoCare</h1>
                 </div>
