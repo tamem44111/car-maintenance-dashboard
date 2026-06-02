@@ -174,6 +174,63 @@ const Recommendations = {
         return result;
     },
 
+    // Full due-status for a service, evaluating BOTH km and time — due on whichever comes first.
+    // Returns null if no recommendation exists for this type.
+    getMaintenanceStatus(car, type) {
+        const rec = this.getEffective(car, type);
+        if (!rec || !rec.km) return null;
+
+        const currentKm = Storage.getEffectiveMileage(car);
+        const services = Storage.getServices(car.id)
+            .filter(s => s.type === type)
+            .sort((a, b) => new Date(b.date) - new Date(a.date));
+        const last = services[0];
+        const months = rec.months || 12;
+        const today = new Date();
+
+        // ── Distance dimension ──
+        const lastKm = last ? (parseInt(last.mileage) || 0) : 0;
+        const baseKm = lastKm > 0 ? lastKm : currentKm;          // assume done at current km if never logged
+        const nextKm = baseKm + rec.km;
+        const kmRemaining = nextKm - currentKm;
+        const kmUsedPct = Math.min(100, Math.max(0, ((rec.km - kmRemaining) / rec.km) * 100));
+
+        // ── Time dimension ──
+        const baseDate = last ? new Date(last.date) : today;     // assume done today if never logged
+        const nextDate = new Date(baseDate);
+        nextDate.setMonth(nextDate.getMonth() + months);
+        const daysRemaining = Math.ceil((nextDate - today) / 86400000);
+        const totalDays = months * 30.44;
+        const timeUsedPct = Math.min(100, Math.max(0, ((totalDays - daysRemaining) / totalDays) * 100));
+
+        // ── Whichever comes first (compare raw "fraction of life remaining"; smaller = more urgent) ──
+        const usedPct = Math.max(kmUsedPct, timeUsedPct);
+        const kmRatio = kmRemaining / rec.km;
+        const timeRatio = daysRemaining / totalDays;
+        const binding = timeRatio < kmRatio ? 'time' : 'km';
+
+        let status = 'ok';
+        if (kmRemaining <= 0 || daysRemaining <= 0) status = 'overdue';
+        else if (kmRemaining <= rec.km * 0.15 || daysRemaining <= 30) status = 'soon';
+
+        let detail;
+        if (binding === 'time') {
+            detail = daysRemaining <= 0 ? `${Math.abs(daysRemaining)} days overdue`
+                : daysRemaining <= 60 ? `in ${daysRemaining} days`
+                : `in ${Math.round(daysRemaining / 30)} months`;
+        } else {
+            detail = kmRemaining <= 0 ? `${Math.abs(kmRemaining).toLocaleString()} km over`
+                : `${kmRemaining.toLocaleString()} km left`;
+        }
+
+        return {
+            type, rec, status, binding, detail,
+            kmRemaining, daysRemaining, usedPct: Math.round(usedPct),
+            nextKm, nextDate: nextDate.toISOString().split('T')[0],
+            lastServiced: last ? last.date : null
+        };
+    },
+
     createReminderFromService(car, serviceType, serviceMileage, serviceDate) {
         if (serviceType === 'Oil Change') return;
 

@@ -56,6 +56,7 @@ const Storage = {
         service.id = Date.now().toString() + Math.random().toString(36).substr(2, 4);
         data.services.push(service);
         this.save(data);
+        this._syncOdometer(service.carId, service.mileage);
         return service;
     },
 
@@ -110,7 +111,28 @@ const Storage = {
         log.id = Date.now().toString() + Math.random().toString(36).substr(2, 4);
         data.fuelLogs.push(log);
         this.save(data);
+        this._syncOdometer(log.carId, log.odometer);
         return log;
+    },
+
+    // Keep the car's odometer current using the latest reading from any log/service
+    _syncOdometer(carId, reading) {
+        const km = parseInt(reading);
+        if (!km || !carId) return;
+        const data = this.getAll();
+        const idx = data.cars.findIndex(c => c.id === carId);
+        if (idx !== -1 && km > (parseInt(data.cars[idx].mileage) || 0)) {
+            data.cars[idx].mileage = km.toString();
+            this.save(data);
+        }
+    },
+
+    // Highest known odometer reading across the car record, services and fuel logs
+    getEffectiveMileage(car) {
+        let max = parseInt(car.mileage) || 0;
+        this.getServices(car.id).forEach(s => { const m = parseInt(s.mileage) || 0; if (m > max) max = m; });
+        this.getFuelLogs(car.id).forEach(f => { const m = parseInt(f.odometer) || 0; if (m > max) max = m; });
+        return max;
     },
 
     updateFuelLog(id, updates) {
@@ -167,21 +189,124 @@ const Storage = {
         return results;
     },
 
+    // Flags an abnormal jump in fuel consumption (early warning of a mechanical issue)
+    getFuelAnomaly(carId) {
+        const c = this.getFuelConsumption(carId);
+        if (!c || c.length < 4) return null;
+        const latest = parseFloat(c[c.length - 1].lPer100km);
+        const prior = c.slice(0, -1);
+        const avg = prior.reduce((s, x) => s + parseFloat(x.lPer100km), 0) / prior.length;
+        if (avg <= 0) return null;
+        const pct = ((latest - avg) / avg) * 100;
+        if (pct >= 15) {
+            return { latest: latest.toFixed(1), avg: avg.toFixed(1), pct: Math.round(pct), date: c[c.length - 1].date };
+        }
+        return null;
+    },
+
+    // Average historical cost for a service type (used to estimate upcoming spend)
+    getAverageServiceCost(type, carId) {
+        const matches = this.getServices(carId).filter(s => s.type === type && parseFloat(s.cost) > 0);
+        if (!matches.length) return null;
+        return matches.reduce((s, x) => s + parseFloat(x.cost), 0) / matches.length;
+    },
+
+    // Fallback estimates (SAR) when no personal history exists yet
+    _defaultCost: {
+        'Oil Change': 180, 'Tire Rotation': 60, 'Brake Inspection': 120, 'Air Filter': 90,
+        'Transmission': 450, 'Coolant Flush': 200, 'Battery': 350, 'Spark Plugs': 280,
+        'Alignment': 150, 'Registration Renewal': 300, 'Insurance Renewal': 1200, 'Inspection': 150, 'Other': 200
+    },
+
+    estimateServiceCost(type, carId) {
+        return this.getAverageServiceCost(type, carId) || this._defaultCost[type] || 200;
+    },
+
+    // Projected spend over the next `months`: combines scheduled maintenance that is
+    // overdue/due within the horizon (whichever-first engine) plus any manual reminders.
+    getCostForecast(carId, months = 6) {
+        const horizon = new Date();
+        horizon.setMonth(horizon.getMonth() + months);
+        const cars = this.getCars().filter(c => carId === 'all' || c.id === carId);
+        const recTypes = ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Air Filter', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs'];
+        const seen = new Set();
+        const items = [];
+
+        cars.forEach(c => {
+            recTypes.forEach(type => {
+                const st = Recommendations.getMaintenanceStatus(c, type);
+                if (!st) return;
+                // include if overdue, or its next-due date falls within the horizon
+                if (st.status === 'overdue' || new Date(st.nextDate) <= horizon) {
+                    seen.add(c.id + '|' + type);
+                    items.push({ type, carId: c.id, dueDate: st.nextDate, est: this.estimateServiceCost(type, c.id) });
+                }
+            });
+            // manual reminders not already covered by the schedule
+            this.getUpcomingReminders(c.id).forEach(r => {
+                if (r.autoCreated) return;
+                if (seen.has(c.id + '|' + r.type)) return;
+                if (new Date(r.dueDate) > horizon) return;
+                items.push({ type: r.type, carId: c.id, dueDate: r.dueDate, est: this.estimateServiceCost(r.type, c.id) });
+            });
+        });
+
+        const total = items.reduce((s, i) => s + i.est, 0);
+        return { items, total, months };
+    },
+
+    // Total cost of ownership per km (lifetime spend / km driven since first record)
+    getCostPerKm(carId) {
+        const total = this.getTotalExpenses(carId);
+        const car = this.getCars().find(c => c.id === carId);
+        if (!car) return null;
+        const readings = [
+            ...this.getServices(carId).map(s => parseInt(s.mileage) || 0),
+            ...this.getFuelLogs(carId).map(f => parseInt(f.odometer) || 0)
+        ].filter(m => m > 0);
+        if (readings.length < 1) return null;
+        const minKm = Math.min(...readings);
+        const maxKm = this.getEffectiveMileage(car);
+        const span = maxKm - minKm;
+        if (span <= 0) return null;
+        return total / span;
+    },
+
+    // Spend within a given YYYY-MM month
+    getMonthlySpend(carId, yearMonth) {
+        let total = 0;
+        this.getServices(carId).forEach(s => { if (s.date && s.date.substring(0, 7) === yearMonth) total += parseFloat(s.cost) || 0; });
+        this.getFuelLogs(carId).forEach(f => { if (f.date && f.date.substring(0, 7) === yearMonth) total += parseFloat(f.totalCost) || 0; });
+        return total;
+    },
+
+    // This-month vs last-month delta (for trend arrows)
+    getSpendTrend(carId) {
+        const now = new Date();
+        const thisYM = now.toISOString().substring(0, 7);
+        const lastDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+        const lastYM = lastDate.toISOString().substring(0, 7);
+        const cur = this.getMonthlySpend(carId, thisYM);
+        const prev = this.getMonthlySpend(carId, lastYM);
+        let pct = null;
+        if (prev > 0) pct = Math.round(((cur - prev) / prev) * 100);
+        else if (cur > 0) pct = 100;
+        return { current: cur, previous: prev, pct };
+    },
+
     getCarHealthScore(car) {
         const recs = Recommendations.getAllForCar(car);
-        const currentMileage = parseInt(car.mileage) || 0;
-        const services = this.getServices(car.id);
         const reminders = this.getUpcomingReminders(car.id);
         let totalItems = 0, healthyItems = 0;
 
-        Object.entries(recs).forEach(([type, rec]) => {
+        // Each scheduled service evaluated on whichever-comes-first (km OR time)
+        Object.keys(recs).forEach(type => {
+            const st = Recommendations.getMaintenanceStatus(car, type);
+            if (!st) return;
             totalItems++;
-            const lastService = services.filter(s => s.type === type).sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-            const lastKm = lastService ? parseInt(lastService.mileage) || 0 : 0;
-            const nextKm = lastKm > 0 ? lastKm + rec.km : currentMileage + rec.km;
-            const remaining = nextKm - currentMileage;
-            if (remaining > rec.km * 0.2) healthyItems++;
-            else if (remaining > 0) healthyItems += 0.5;
+            if (st.status === 'ok') healthyItems++;
+            else if (st.status === 'soon') healthyItems += 0.5;
+            // overdue contributes 0
         });
 
         // Check insurance

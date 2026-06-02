@@ -1012,6 +1012,198 @@ tr:hover td { background: var(--card-hover); }
 
 
 /* ══════════════════════════════════════════════════
+   ACTION CENTER
+   ══════════════════════════════════════════════════ */
+.action-center-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    padding: 20px 22px;
+    margin-bottom: 24px;
+}
+.ac-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 14px;
+}
+.ac-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--text3);
+}
+.ac-count {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--primary);
+    background: var(--primary-light);
+    padding: 3px 10px;
+    border-radius: 20px;
+}
+.ac-list { display: flex; flex-direction: column; gap: 2px; }
+.ac-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 12px 14px;
+    border-radius: var(--radius-sm);
+    border-left: 3px solid transparent;
+    transition: var(--transition);
+}
+.ac-item:hover { background: var(--bg); }
+.ac-item.ac-critical { border-left-color: var(--red); }
+.ac-item.ac-warning { border-left-color: var(--orange); }
+.ac-item.ac-info { border-left-color: var(--blue); }
+.ac-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 10px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.ac-critical .ac-icon { background: var(--red-bg); color: var(--red); }
+.ac-warning .ac-icon { background: var(--orange-bg); color: var(--orange); }
+.ac-info .ac-icon { background: var(--blue-bg); color: var(--blue); }
+.ac-text { flex: 1; min-width: 0; }
+.ac-item-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.ac-item-sub { font-size: 12px; color: var(--text3); margin-top: 1px; }
+.ac-btn { flex-shrink: 0; }
+.ac-more {
+    font-size: 12px;
+    color: var(--text3);
+    text-align: center;
+    padding: 8px;
+    font-weight: 500;
+}
+.action-center-card.all-clear {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+.ac-clear-icon {
+    width: 48px;
+    height: 48px;
+    border-radius: 50%;
+    background: var(--green-bg);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.ac-clear-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.ac-clear-sub { font-size: 12.5px; color: var(--text3); margin-top: 2px; }
+
+/* ══════════════════════════════════════════════════
+   STAT TREND
+   ══════════════════════════════════════════════════ */
+.stat-trend {
+    display: inline-block;
+    font-size: 11px;
+    font-weight: 600;
+    margin-top: 4px;
+}
+.trend-up { color: var(--red); }
+.trend-down { color: var(--green); }
+.trend-flat { color: var(--text3); }
+
+/* ══════════════════════════════════════════════════
+   MAINTENANCE PROGRESS ROWS
+   ══════════════════════════════════════════════════ */
+.rec-row2 {
+    padding: 10px 0;
+    border-bottom: 1px solid var(--border2);
+}
+.rec-row2:last-child { border-bottom: none; }
+.rec-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 7px;
+}
+.rec-progress {
+    height: 6px;
+    background: var(--bg2);
+    border-radius: 20px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.rec-progress-bar {
+    height: 100%;
+    border-radius: 20px;
+    transition: width .6s var(--ease);
+    min-width: 4px;
+}
+.rec-progress-bar.green { background: var(--green); }
+.rec-progress-bar.orange { background: var(--orange); }
+.rec-progress-bar.red { background: var(--red); }
+.rec-meta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+}
+.rec-meta .rec-detail { font-size: 11px; color: var(--text3); }
+.rec-meta .rec-next { font-size: 11px; font-weight: 600; color: var(--text2); }
+
+/* ══════════════════════════════════════════════════
+   COST FORECAST & TCO
+   ══════════════════════════════════════════════════ */
+.forecast-total {
+    font-size: 32px;
+    font-weight: 800;
+    letter-spacing: -.5px;
+    color: var(--primary);
+}
+.forecast-total span { font-size: 16px; font-weight: 600; color: var(--text3); }
+.forecast-sub { font-size: 12px; color: var(--text3); margin-bottom: 14px; }
+.forecast-list { display: flex; flex-direction: column; gap: 8px; }
+.forecast-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    padding: 6px 0;
+    border-bottom: 1px solid var(--border2);
+}
+.forecast-row:last-child { border-bottom: none; }
+.forecast-est { font-weight: 600; color: var(--text2); }
+.tco-list { display: flex; flex-direction: column; gap: 10px; }
+.tco-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    padding: 8px 12px;
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+}
+.tco-name { font-size: 13px; font-weight: 600; }
+.tco-val { font-size: 18px; font-weight: 800; color: var(--primary); letter-spacing: -.3px; }
+.tco-val small { font-size: 11px; font-weight: 500; color: var(--text3); }
+
+/* ══════════════════════════════════════════════════
+   RECALL NOTE
+   ══════════════════════════════════════════════════ */
+.recall-note {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin-top: 14px;
+    padding: 10px 12px;
+    background: var(--red-bg);
+    border: 1px solid var(--red-border);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--red);
+    font-weight: 500;
+    line-height: 1.4;
+}
+.recall-note svg { flex-shrink: 0; margin-top: 1px; }
+
+/* ══════════════════════════════════════════════════
    EMPTY STATES
    ══════════════════════════════════════════════════ */
 .empty-state {

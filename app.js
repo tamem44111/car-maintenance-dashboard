@@ -112,7 +112,9 @@ const App = {
             <div class="form-row">
                 <div class="form-group"><label>Insurance Expiry</label><input type="date" id="f-insurance" value="${car?car.insuranceExpiry||'':''}"></div>
                 <div class="form-group"><label>Registration (Istimara) Expiry</label><input type="date" id="f-registration" value="${car?car.registrationExpiry||'':''}"></div>
-            </div>`;
+            </div>
+            <div class="form-group"><label>Manufacturer Warranty Until</label><input type="date" id="f-warranty" value="${car?car.warrantyExpiry||'':''}"></div>
+            <div class="form-group"><label>Recall / Safety Notes</label><textarea id="f-recall" rows="2" placeholder="e.g. Open recall: airbag inflator — book at dealer">${car?car.recallNotes||'':''}</textarea></div>`;
         this.openModal(car?'Edit Car':'Add Car', html, () => {
             const data = {
                 make: document.getElementById('f-make').value.trim(),
@@ -123,6 +125,8 @@ const App = {
                 color: document.getElementById('f-color').value.trim(),
                 insuranceExpiry: document.getElementById('f-insurance').value,
                 registrationExpiry: document.getElementById('f-registration').value,
+                warrantyExpiry: document.getElementById('f-warranty').value,
+                recallNotes: document.getElementById('f-recall').value.trim(),
             };
             if (!data.make || !data.model || !data.year) return alert('Please fill in make, model, and year.');
             if (car) Storage.updateCar(car.id, data);
@@ -132,7 +136,7 @@ const App = {
     },
 
     // ── Service Modal ──
-    openServiceModal(service = null) {
+    openServiceModal(service = null, presetCarId = null, presetType = null) {
         const cars = Storage.getCars();
         if (!cars.length) return alert('Please add a car first.');
         const types = ['Oil Change','Tire Rotation','Brake Inspection','Air Filter','Transmission','Coolant Flush','Battery','Spark Plugs','Alignment','Other'];
@@ -140,14 +144,16 @@ const App = {
         const isOil = service && service.type === 'Oil Change';
         const chips = types.map(t => {
             const id = 'svc-'+t.toLowerCase().replace(/\s+/g,'-');
-            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${isEdit?'disabled':''} onchange="(function(){var o=document.getElementById('oil-options'),c=document.getElementById('svc-oil-change');o.style.display=c&&c.checked?'block':'none'})()"><span class="service-chip-label">${t}</span></label>`;
+            const preChecked = !isEdit && presetType === t;
+            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${preChecked?'checked':''} ${isEdit?'disabled':''} onchange="(function(){var o=document.getElementById('oil-options'),c=document.getElementById('svc-oil-change');o.style.display=c&&c.checked?'block':'none'})()"><span class="service-chip-label">${t}</span></label>`;
         }).join('');
+        const selCar = service?service.carId:presetCarId;
         const html = `
-            <div class="form-group"><label>Car</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${service&&service.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Car</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-group"><label>${isEdit?'Service Type':'Services Performed (select all that apply)'}</label>
                 ${isEdit?`<select id="f-type" onchange="document.getElementById('oil-options').style.display=this.value==='Oil Change'?'block':'none'">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${t}</option>`).join('')}</select>`:`<div class="service-chips">${chips}</div>`}
             </div>
-            <div id="oil-options" style="display:${isOil?'block':'none'}">
+            <div id="oil-options" style="display:${isOil||presetType==='Oil Change'?'block':'none'}">
                 <div class="form-group"><label>Oil Type (next change interval)</label>
                     <div class="oil-interval-group">
                         <label class="oil-option"><input type="radio" name="oil-interval" value="5000" ${!service||!service.oilInterval||service.oilInterval==='5000'?'checked':''}><span class="oil-option-card"><strong>5,000 km</strong><small>Regular</small></span></label>
@@ -160,7 +166,7 @@ const App = {
                 <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"></div>
             </div>
-            <div class="form-group"><label>Mileage at Service (km)</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:''}"></div>
+            <div class="form-group"><label>Mileage at Service (km)</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{}):'')}"></div>
             <div class="form-group"><label>Notes</label><textarea id="f-notes" rows="2" placeholder="Optional...">${service?service.notes||'':''}</textarea></div>`;
         this.openModal(isEdit?'Edit Service':'Add Service', html, () => {
             const carId=document.getElementById('f-car').value, date=document.getElementById('f-date').value, cost=document.getElementById('f-cost').value, mileage=document.getElementById('f-smileage').value, notes=document.getElementById('f-notes').value.trim();
@@ -274,21 +280,29 @@ const App = {
         const cid=this.selectedCarId, cars=Storage.getCars(), services=Storage.getServices(cid), reminders=Storage.getUpcomingReminders(cid), total=Storage.getTotalExpenses(cid);
         document.getElementById('stat-cars').textContent=cars.length;
         document.getElementById('stat-services').textContent=services.length;
-        document.getElementById('stat-expenses').textContent=total.toFixed(0)+' SAR';
         document.getElementById('stat-reminders').textContent=reminders.length;
 
-        // Alerts
-        const alerts=[];
-        const overdue=reminders.filter(r=>new Date(r.dueDate)<new Date());
-        overdue.forEach(r=>{const car=cars.find(c=>c.id===r.carId); alerts.push({type:'red',text:`${r.type} overdue for ${car?car.make+' '+car.model:'a car'} — was due ${r.dueDate}`});});
-        const soon=reminders.filter(r=>{const d=Math.ceil((new Date(r.dueDate)-new Date())/86400000);return d>=0&&d<=7;});
-        soon.forEach(r=>{const car=cars.find(c=>c.id===r.carId);const d=Math.ceil((new Date(r.dueDate)-new Date())/86400000); alerts.push({type:'orange',text:`${r.type} due ${d===0?'today':'in '+d+' days'} for ${car?car.make+' '+car.model:'a car'}`});});
-        cars.forEach(c=>{
-            if(c.insuranceExpiry){const d=Math.ceil((new Date(c.insuranceExpiry)-new Date())/86400000);if(d<0)alerts.push({type:'red',text:`Insurance expired for ${c.make} ${c.model} (${c.insuranceExpiry})`});else if(d<=30)alerts.push({type:'orange',text:`Insurance expires in ${d} days for ${c.make} ${c.model}`});}
-            if(c.registrationExpiry){const d=Math.ceil((new Date(c.registrationExpiry)-new Date())/86400000);if(d<0)alerts.push({type:'red',text:`Registration (Istimara) expired for ${c.make} ${c.model}`});else if(d<=30)alerts.push({type:'orange',text:`Registration expires in ${d} days for ${c.make} ${c.model}`});}
-        });
-        const alertsEl=document.getElementById('alerts-section');
-        alertsEl.innerHTML=alerts.length?`<div class="alerts-container">${alerts.map(a=>`<div class="alert alert-${a.type}"><span class="alert-icon">${a.type==='red'?'&#9888;':'&#9432;'}</span>${a.text}</div>`).join('')}</div>`:'';
+        // Total spent with month-over-month trend
+        const trend=Storage.getSpendTrend(cid);
+        let trendHTML='';
+        if(trend.pct!==null){
+            const up=trend.pct>0, flat=trend.pct===0;
+            const arrow=flat?'→':(up?'▲':'▼');
+            const tClass=flat?'trend-flat':(up?'trend-up':'trend-down');
+            trendHTML=`<span class="stat-trend ${tClass}">${arrow} ${Math.abs(trend.pct)}% vs last mo.</span>`;
+        }
+        const expEl=document.getElementById('stat-expenses');
+        expEl.innerHTML=total.toFixed(0)+' SAR';
+        const expInfo=expEl.parentElement;
+        let existingTrend=expInfo.querySelector('.stat-trend');
+        if(existingTrend) existingTrend.remove();
+        if(trendHTML) expInfo.insertAdjacentHTML('beforeend',trendHTML);
+
+        // Action Center & forecast
+        if (typeof Features !== 'undefined') {
+            Features.renderActionCenter(cid);
+            Features.renderForecast(cid);
+        }
 
         // Health cards
         const healthEl=document.getElementById('car-health-section');
@@ -330,28 +344,41 @@ const App = {
         el.innerHTML=cars.map(c=>{
             const sc=Storage.getServices(c.id).length, tc=Storage.getTotalExpenses(c.id), h=Storage.getCarHealthScore(c);
             const recs=Recommendations.getAllForCar(c), hasRecs=Object.keys(recs).length>0;
-            const services=Storage.getServices(c.id), currentMileage=parseInt(c.mileage)||0;
+            const effKm=Storage.getEffectiveMileage(c), cpk=Storage.getCostPerKm(c.id);
             let recsHTML='';
             if(hasRecs){
-                recsHTML=`<div class="car-recs"><div class="car-recs-title">Maintenance Schedule</div>${Object.entries(recs).map(([type,rec])=>{
-                    const ls=services.filter(s=>s.type===type).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-                    const lk=ls?parseInt(ls.mileage)||0:0;
-                    const nk=lk>0?lk+rec.km:currentMileage+rec.km;
-                    const rem=nk-currentMileage;
-                    let sb='';if(rem<=0)sb='<span class="badge badge-red">Overdue</span>';else if(rem<=1000)sb='<span class="badge badge-orange">Soon</span>';else sb='<span class="badge badge-green">OK</span>';
-                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${type}</span><span class="rec-detail">Every ${rec.km.toLocaleString()} km &middot; ${rec.note}</span></div><div class="rec-status">${sb}<span class="rec-next">${rem>0?rem.toLocaleString()+' km left':Math.abs(rem).toLocaleString()+' km over'}</span></div></div>`;
+                recsHTML=`<div class="car-recs"><div class="car-recs-title">Maintenance Schedule</div>${Object.keys(recs).map(type=>{
+                    const st=Recommendations.getMaintenanceStatus(c,type);
+                    if(!st) return '';
+                    const sClass=st.status==='overdue'?'red':st.status==='soon'?'orange':'green';
+                    const sLabel=st.status==='overdue'?'Overdue':st.status==='soon'?'Soon':'OK';
+                    return `<div class="rec-row2">
+                        <div class="rec-top"><span class="rec-type">${type}</span><span class="badge badge-${sClass}">${sLabel}</span></div>
+                        <div class="rec-progress"><div class="rec-progress-bar ${sClass}" style="width:${Math.min(100,st.usedPct)}%"></div></div>
+                        <div class="rec-meta"><span class="rec-detail">Every ${st.rec.km.toLocaleString()} km / ${st.rec.months||12} mo</span><span class="rec-next">${st.detail}</span></div>
+                    </div>`;
                 }).join('')}</div>`;
             }
-            // Insurance/registration
+            // Documents: insurance, registration, vehicle warranty
             let docsHTML='';
             const docs=[];
             if(c.insuranceExpiry){const d=Math.ceil((new Date(c.insuranceExpiry)-new Date())/86400000);docs.push({label:'Insurance',date:c.insuranceExpiry,days:d});}
             if(c.registrationExpiry){const d=Math.ceil((new Date(c.registrationExpiry)-new Date())/86400000);docs.push({label:'Registration',date:c.registrationExpiry,days:d});}
+            if(c.warrantyExpiry){const d=Math.ceil((new Date(c.warrantyExpiry)-new Date())/86400000);docs.push({label:'Warranty',date:c.warrantyExpiry,days:d,warranty:true});}
             if(docs.length){
                 docsHTML=`<div class="car-recs"><div class="car-recs-title">Documents</div>${docs.map(doc=>{
-                    let sb='';if(doc.days<0)sb='<span class="badge badge-red">Expired</span>';else if(doc.days<=30)sb='<span class="badge badge-orange">${doc.days}d left</span>';else sb='<span class="badge badge-green">Valid</span>';
-                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${doc.label}</span><span class="rec-detail">Expires ${doc.date}</span></div><div class="rec-status">${sb}</div></div>`;
+                    let sb='';
+                    if(doc.warranty){sb=doc.days<0?'<span class="badge badge-red">Expired</span>':'<span class="badge badge-blue">Active</span>';}
+                    else if(doc.days<0)sb='<span class="badge badge-red">Expired</span>';
+                    else if(doc.days<=30)sb=`<span class="badge badge-orange">${doc.days}d left</span>`;
+                    else sb='<span class="badge badge-green">Valid</span>';
+                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${doc.label}</span><span class="rec-detail">${doc.warranty?'Until':'Expires'} ${doc.date}</span></div><div class="rec-status">${sb}</div></div>`;
                 }).join('')}</div>`;
+            }
+            // Recall / safety notes
+            let recallHTML='';
+            if(c.recallNotes&&c.recallNotes.trim()){
+                recallHTML=`<div class="recall-note"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${c.recallNotes}</span></div>`;
             }
             // Tire info
             let tireHTML='';
@@ -366,16 +393,18 @@ const App = {
             return `<div class="car-card">
                 <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}">${h.score}% ${h.label}</span></div>
                 <div class="car-card-details">
-                    <div class="car-detail"><span>Mileage</span><span>${c.mileage?parseInt(c.mileage).toLocaleString()+' km':'-'}</span></div>
+                    <div class="car-detail"><span>Odometer</span><span>${effKm?effKm.toLocaleString()+' km':'-'}</span></div>
                     <div class="car-detail"><span>Plate</span><span>${c.plate||'-'}</span></div>
                     <div class="car-detail"><span>Services</span><span>${sc}</span></div>
                     <div class="car-detail"><span>Total Spent</span><span>${tc.toFixed(0)} SAR</span></div>
+                    ${cpk!==null?`<div class="car-detail"><span>Running Cost</span><span>${cpk.toFixed(2)} SAR/km</span></div>`:''}
                 </div>
-                ${docsHTML}${recsHTML}${tireHTML}
+                ${recallHTML}${docsHTML}${recsHTML}${tireHTML}
                 <div class="car-card-actions">
                     <button class="btn btn-secondary btn-sm" onclick="App.openCarModal(Storage.getCars().find(c=>c.id==='${c.id}'))">Edit</button>
                     ${hasRecs?`<button class="btn btn-secondary btn-sm" onclick="App.openCustomRecModal('${c.id}')">+ Custom</button>`:''}
                     <button class="btn btn-secondary btn-sm" onclick="Features.openTireModal('${c.id}')">Tires</button>
+                    <button class="btn btn-secondary btn-sm" onclick="Features.printServiceHistory('${c.id}')">Print History</button>
                     <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this car and all records?')){Storage.deleteCar('${c.id}');App.renderPage(App.currentPage);}">Delete</button>
                 </div>
             </div>`;
