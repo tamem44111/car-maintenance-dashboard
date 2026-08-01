@@ -33,9 +33,14 @@ const Features = {
                             const fids = new Set((existing.fuelLogs || []).map(f => f.id));
                             data.fuelLogs.forEach(f => { if (!fids.has(f.id)) existing.fuelLogs.push(f); });
                         }
+                        if (data.odometerLogs) {
+                            if (!existing.odometerLogs) existing.odometerLogs = [];
+                            const oids = new Set(existing.odometerLogs.map(o => o.id));
+                            data.odometerLogs.forEach(o => { if (!oids.has(o.id)) existing.odometerLogs.push(o); });
+                        }
                         Storage.save(existing);
                     } else {
-                        Storage.save({ cars: data.cars, services: data.services, reminders: data.reminders, fuelLogs: data.fuelLogs || [] });
+                        Storage.save({ cars: data.cars, services: data.services, reminders: data.reminders, fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [] });
                     }
                     if (data.customRecs) localStorage.setItem('autocare_custom_recs', JSON.stringify(data.customRecs));
                     alert('Data imported successfully!');
@@ -44,6 +49,96 @@ const Features = {
             } catch (err) { alert('Error reading file: ' + err.message); }
         };
         reader.readAsText(file);
+    },
+
+    // ── Odometer Update ──
+    openOdometerModal(carId = null) {
+        const cars = Storage.getCars();
+        if (!cars.length) return alert('Please add a car first.');
+        const target = carId || cars[0].id;
+
+        const panel = (cid) => {
+            const car = cars.find(c => c.id === cid);
+            if (!car) return '';
+            const proj = Storage.getProjectedMileage(car);
+            const fresh = Storage.getOdometerFreshness(car);
+            if (!proj.lastKm) return `<div class="odo-panel"><div class="odo-hint">No reading recorded yet — enter the number on your dashboard now.</div></div>`;
+            const rateTxt = proj.rate ? `${proj.rate.toFixed(0)} km/day average` : 'not enough history to estimate yet';
+            return `<div class="odo-panel">
+                <div class="odo-row"><span>Last confirmed</span><strong>${proj.lastKm.toLocaleString()} km</strong></div>
+                <div class="odo-row"><span>Recorded</span><strong>${proj.lastDate || '—'}${fresh.daysSince !== null ? ` (${fresh.daysSince}d ago)` : ''}</strong></div>
+                ${proj.estimated ? `<div class="odo-row odo-est"><span>Estimated today</span><strong>~ ${proj.km.toLocaleString()} km</strong></div>` : ''}
+                <div class="odo-hint">${rateTxt}</div>
+            </div>`;
+        };
+
+        const html = `
+            <p class="odo-intro">Enter the number shown on your car's dashboard. This keeps every km-based service reminder counting down accurately.</p>
+            <div class="form-group"><label>Car</label>
+                <select id="f-odo-car" onchange="Features._refreshOdoPanel()">
+                    ${cars.map(c => `<option value="${c.id}" ${c.id === target ? 'selected' : ''}>${c.year} ${c.make} ${c.model}</option>`).join('')}
+                </select>
+            </div>
+            <div id="odo-panel-wrap">${panel(target)}</div>
+            <div class="form-row">
+                <div class="form-group"><label>Current Odometer (km)</label><input type="number" id="f-odo-km" placeholder="e.g. 62500" inputmode="numeric" oninput="Features._checkOdoInput()"></div>
+                <div class="form-group"><label>Reading Date</label><input type="date" id="f-odo-date" value="${new Date().toISOString().split('T')[0]}"></div>
+            </div>
+            <div id="odo-warn"></div>`;
+
+        App.openModal('Update Odometer', html, () => {
+            const cid = document.getElementById('f-odo-car').value;
+            const km = parseInt(document.getElementById('f-odo-km').value);
+            const date = document.getElementById('f-odo-date').value;
+            if (!km || km <= 0) return alert('Please enter a valid odometer reading.');
+            if (!date) return alert('Please choose the reading date.');
+
+            const car = Storage.getCars().find(c => c.id === cid);
+            const last = Storage.getLastReading(car);
+            if (last && km < last.km) {
+                if (!confirm(`That is lower than your last recorded reading (${last.km.toLocaleString()} km).\n\nSave it anyway? Choose Cancel if it was a typo.`)) return;
+            }
+            Storage.logOdometer(cid, km, date);
+            App.closeModal();
+            App.renderPage(App.currentPage);
+        });
+
+        setTimeout(() => { const i = document.getElementById('f-odo-km'); if (i) i.focus(); }, 60);
+    },
+
+    // Live typo guard: flags a reading below the last confirmed one as you type
+    _checkOdoInput() {
+        const input = document.getElementById('f-odo-km');
+        const warn = document.getElementById('odo-warn');
+        if (!input || !warn) return;
+        const cid = document.getElementById('f-odo-car').value;
+        const car = Storage.getCars().find(c => c.id === cid);
+        const last = car ? Storage.getLastReading(car) : null;
+        const v = parseInt(input.value);
+        if (last && v && v < last.km) {
+            warn.innerHTML = `<div class="odo-warning">Lower than your last reading of ${last.km.toLocaleString()} km — double-check the number.</div>`;
+        } else {
+            warn.innerHTML = '';
+        }
+    },
+
+    _refreshOdoPanel() {
+        const cid = document.getElementById('f-odo-car').value;
+        const cars = Storage.getCars();
+        const car = cars.find(c => c.id === cid);
+        const wrap = document.getElementById('odo-panel-wrap');
+        if (!car || !wrap) return;
+        const proj = Storage.getProjectedMileage(car);
+        const fresh = Storage.getOdometerFreshness(car);
+        if (!proj.lastKm) { wrap.innerHTML = `<div class="odo-panel"><div class="odo-hint">No reading recorded yet — enter the number on your dashboard now.</div></div>`; return; }
+        const rateTxt = proj.rate ? `${proj.rate.toFixed(0)} km/day average` : 'not enough history to estimate yet';
+        wrap.innerHTML = `<div class="odo-panel">
+            <div class="odo-row"><span>Last confirmed</span><strong>${proj.lastKm.toLocaleString()} km</strong></div>
+            <div class="odo-row"><span>Recorded</span><strong>${proj.lastDate || '—'}${fresh.daysSince !== null ? ` (${fresh.daysSince}d ago)` : ''}</strong></div>
+            ${proj.estimated ? `<div class="odo-row odo-est"><span>Estimated today</span><strong>~ ${proj.km.toLocaleString()} km</strong></div>` : ''}
+            <div class="odo-hint">${rateTxt}</div>
+        </div>`;
+        document.getElementById('odo-warn').innerHTML = '';
     },
 
     // ── Action Center (prioritized "do this now") ──
@@ -59,6 +154,13 @@ const Features = {
 
         cars.forEach(c => {
             const name = `${c.make} ${c.model}`;
+            // Odometer freshness — km-based reminders are only as good as the last reading
+            const fresh = Storage.getOdometerFreshness(c);
+            if (fresh.never || fresh.daysSince === null) {
+                items.push({ priority: 1, icon: 'gauge', title: 'Add an odometer reading', sub: `${name} · needed to track km-based services`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
+            } else if (fresh.stale) {
+                items.push({ priority: fresh.daysSince >= 60 ? 1 : 2, icon: 'gauge', title: `Odometer not updated in ${fresh.daysSince} days`, sub: `${name} · last read ${fresh.lastKm.toLocaleString()} km on ${fresh.lastDate}`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
+            }
             // Maintenance schedule (whichever comes first)
             recTypes.forEach(type => {
                 const st = Recommendations.getMaintenanceStatus(c, type);
@@ -115,7 +217,8 @@ const Features = {
             doc: '<rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
             fuel: '<path d="M3 21V6a2 2 0 012-2h6a2 2 0 012 2v15M13 10h2a2 2 0 012 2v3a2 2 0 002 2 2 2 0 002-2V8l-3-3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
             bell: '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
-            star: '<path d="M12 3l2.7 5.5 6 .9-4.3 4.2 1 6L12 17l-5.4 2.8 1-6L3.3 9.4l6-.9z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>'
+            star: '<path d="M12 3l2.7 5.5 6 .9-4.3 4.2 1 6L12 17l-5.4 2.8 1-6L3.3 9.4l6-.9z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>',
+            gauge: '<path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>'
         };
         const pClass = ['ac-critical', 'ac-warning', 'ac-info'];
         const shown = items.slice(0, 6);
@@ -281,6 +384,7 @@ const Features = {
         const cars = Storage.getCars();
         if (!cars.length) { el.innerHTML = ''; return; }
         el.innerHTML = `<div class="quick-bar">
+            <button class="quick-btn quick-btn-primary" onclick="Features.openOdometerModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/></svg> Update km</button>
             <button class="quick-btn" onclick="App.openFuelModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/><path d="M13 10h2a2 2 0 012 2v3a2 2 0 002 2v0a2 2 0 002-2V8l-3-3" stroke="currentColor" stroke-width="2" fill="none"/></svg> Quick Fuel</button>
             <button class="quick-btn" onclick="App.openServiceModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg> Quick Service</button>
             <button class="quick-btn" onclick="App.openReminderModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none"/></svg> Add Reminder</button>

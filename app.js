@@ -315,7 +315,7 @@ const App = {
                 const overdueC=Storage.getUpcomingReminders(c.id).filter(r=>new Date(r.dueDate)<new Date()).length;
                 return `<div class="health-card">
                     <div class="health-ring"><svg width="70" height="70" viewBox="0 0 64 64"><circle class="health-ring-bg" cx="32" cy="32" r="28"/><circle class="health-ring-fg ${h.color}" cx="32" cy="32" r="28" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"/></svg><div class="health-score">${h.score}</div></div>
-                    <div class="health-info"><div class="health-car-name">${c.make} ${c.model}</div><div class="health-car-year">${c.year} &middot; ${c.mileage?parseInt(c.mileage).toLocaleString()+' km':'-'}</div><span class="health-label ${h.color}">${h.label}</span><div class="health-details">${svcCount} services${overdueC?` &middot; <span style="color:var(--red)">${overdueC} overdue</span>`:''}</div></div>
+                    <div class="health-info"><div class="health-car-name">${c.make} ${c.model}</div><div class="health-car-year">${c.year} &middot; ${(()=>{const p=Storage.getProjectedMileage(c);return p.km?(p.estimated?'~':'')+p.km.toLocaleString()+' km':'-';})()}</div><span class="health-label ${h.color}">${h.label}</span><div class="health-details">${svcCount} services${overdueC?` &middot; <span style="color:var(--red)">${overdueC} overdue</span>`:''}</div></div>
                 </div>`;
             }).join('');
         } else { healthEl.innerHTML=''; }
@@ -344,7 +344,8 @@ const App = {
         el.innerHTML=cars.map(c=>{
             const sc=Storage.getServices(c.id).length, tc=Storage.getTotalExpenses(c.id), h=Storage.getCarHealthScore(c);
             const recs=Recommendations.getAllForCar(c), hasRecs=Object.keys(recs).length>0;
-            const effKm=Storage.getEffectiveMileage(c), cpk=Storage.getCostPerKm(c.id);
+            const proj=Storage.getProjectedMileage(c), effKm=proj.km, cpk=Storage.getCostPerKm(c.id);
+            const fresh=Storage.getOdometerFreshness(c);
             let recsHTML='';
             if(hasRecs){
                 recsHTML=`<div class="car-recs"><div class="car-recs-title">Maintenance Schedule</div>${Object.keys(recs).map(type=>{
@@ -392,8 +393,15 @@ const App = {
             }
             return `<div class="car-card">
                 <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}">${h.score}% ${h.label}</span></div>
+                <div class="odo-block ${fresh.stale?'odo-stale':''}">
+                    <div class="odo-block-main">
+                        <div class="odo-block-label">Odometer${proj.estimated?' <span class="odo-badge">est.</span>':''}</div>
+                        <div class="odo-block-value">${effKm?effKm.toLocaleString():'—'} <small>km</small></div>
+                        <div class="odo-block-sub">${proj.lastKm?`Last read ${proj.lastKm.toLocaleString()} km${fresh.daysSince!==null?` · ${fresh.daysSince===0?'today':fresh.daysSince+'d ago'}`:''}`:'No reading yet'}${proj.rate?` · ${proj.rate.toFixed(0)} km/day`:''}</div>
+                    </div>
+                    <button class="btn btn-primary btn-sm odo-block-btn" onclick="Features.openOdometerModal('${c.id}')">Update</button>
+                </div>
                 <div class="car-card-details">
-                    <div class="car-detail"><span>Odometer</span><span>${effKm?effKm.toLocaleString()+' km':'-'}</span></div>
                     <div class="car-detail"><span>Plate</span><span>${c.plate||'-'}</span></div>
                     <div class="car-detail"><span>Services</span><span>${sc}</span></div>
                     <div class="car-detail"><span>Total Spent</span><span>${tc.toFixed(0)} SAR</span></div>

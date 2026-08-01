@@ -1185,6 +1185,94 @@ tr:hover td { background: var(--card-hover); }
 .tco-val small { font-size: 11px; font-weight: 500; color: var(--text3); }
 
 /* ══════════════════════════════════════════════════
+   ODOMETER
+   ══════════════════════════════════════════════════ */
+.odo-block {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    margin: 14px 0 4px;
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+}
+.odo-block.odo-stale {
+    background: var(--orange-bg);
+    border-color: var(--orange-border);
+}
+.odo-block-main { flex: 1; min-width: 0; }
+.odo-block-label {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .8px;
+    color: var(--text3);
+}
+.odo-badge {
+    display: inline-block;
+    background: var(--blue-bg);
+    color: var(--blue);
+    border: 1px solid var(--blue-border);
+    border-radius: 20px;
+    padding: 1px 6px;
+    font-size: 9px;
+    letter-spacing: .3px;
+    margin-left: 4px;
+    vertical-align: middle;
+}
+.odo-block-value {
+    font-size: 24px;
+    font-weight: 800;
+    letter-spacing: -.5px;
+    line-height: 1.2;
+    margin-top: 2px;
+}
+.odo-block-value small { font-size: 13px; font-weight: 600; color: var(--text3); }
+.odo-block-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
+.odo-block-btn { flex-shrink: 0; }
+
+.odo-intro { font-size: 12.5px; color: var(--text3); margin-bottom: 16px; line-height: 1.5; }
+.odo-panel {
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 16px;
+}
+.odo-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    font-size: 12.5px;
+    color: var(--text2);
+    padding: 3px 0;
+}
+.odo-row strong { color: var(--text); font-weight: 600; }
+.odo-row.odo-est strong { color: var(--primary); }
+.odo-hint {
+    font-size: 11px;
+    color: var(--text3);
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--border);
+}
+.odo-warning {
+    font-size: 12px;
+    color: var(--orange);
+    background: var(--orange-bg);
+    border: 1px solid var(--orange-border);
+    border-radius: var(--radius-xs);
+    padding: 8px 12px;
+    font-weight: 500;
+}
+.quick-btn-primary {
+    border-color: var(--primary);
+    background: var(--primary-light);
+    color: var(--primary);
+}
+
+/* ══════════════════════════════════════════════════
    RECALL NOTE
    ══════════════════════════════════════════════════ */
 .recall-note {
@@ -1324,6 +1412,8 @@ tr:hover td { background: var(--card-hover); }
     .drive-stat { min-width: 80px; padding: 12px 8px; }
     .drive-val { font-size: 20px; }
     .compare-name { width: 70px; font-size: 11px; }
+    .odo-block { padding: 12px 14px; gap: 10px; }
+    .odo-block-value { font-size: 20px; }
 
     .modal { width: 95vw; max-height: 80vh; }
     .modal-body { padding: 16px; }

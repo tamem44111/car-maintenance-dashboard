@@ -2,7 +2,7 @@ const Storage = {
     _key: 'autocare_data',
 
     _defaults() {
-        return { cars: [], services: [], reminders: [], fuelLogs: [] };
+        return { cars: [], services: [], reminders: [], fuelLogs: [], odometerLogs: [] };
     },
 
     getAll() {
@@ -10,6 +10,7 @@ const Storage = {
         if (!raw) return this._defaults();
         const data = JSON.parse(raw);
         if (!data.fuelLogs) data.fuelLogs = [];
+        if (!data.odometerLogs) data.odometerLogs = [];
         return data;
     },
 
@@ -41,6 +42,7 @@ const Storage = {
         data.services = data.services.filter(s => s.carId !== id);
         data.reminders = data.reminders.filter(r => r.carId !== id);
         data.fuelLogs = data.fuelLogs.filter(f => f.carId !== id);
+        data.odometerLogs = (data.odometerLogs || []).filter(o => o.carId !== id);
         this.save(data);
     },
 
@@ -56,7 +58,7 @@ const Storage = {
         service.id = Date.now().toString() + Math.random().toString(36).substr(2, 4);
         data.services.push(service);
         this.save(data);
-        this._syncOdometer(service.carId, service.mileage);
+        this._syncOdometer(service.carId, service.mileage, service.date);
         return service;
     },
 
@@ -111,28 +113,118 @@ const Storage = {
         log.id = Date.now().toString() + Math.random().toString(36).substr(2, 4);
         data.fuelLogs.push(log);
         this.save(data);
-        this._syncOdometer(log.carId, log.odometer);
+        this._syncOdometer(log.carId, log.odometer, log.date);
         return log;
     },
 
     // Keep the car's odometer current using the latest reading from any log/service
-    _syncOdometer(carId, reading) {
+    _syncOdometer(carId, reading, date) {
         const km = parseInt(reading);
         if (!km || !carId) return;
         const data = this.getAll();
         const idx = data.cars.findIndex(c => c.id === carId);
         if (idx !== -1 && km > (parseInt(data.cars[idx].mileage) || 0)) {
             data.cars[idx].mileage = km.toString();
+            data.cars[idx].mileageDate = date || new Date().toISOString().split('T')[0];
             this.save(data);
         }
     },
 
-    // Highest known odometer reading across the car record, services and fuel logs
+    // --- Odometer readings ---
+    logOdometer(carId, km, date) {
+        const reading = parseInt(km);
+        if (!reading || !carId) return null;
+        const data = this.getAll();
+        const entry = {
+            id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
+            carId,
+            km: reading,
+            date: date || new Date().toISOString().split('T')[0]
+        };
+        data.odometerLogs.push(entry);
+        this.save(data);
+        this._syncOdometer(carId, reading, entry.date);
+        return entry;
+    },
+
+    getOdometerLogs(carId) {
+        const logs = this.getAll().odometerLogs;
+        if (carId && carId !== 'all') return logs.filter(o => o.carId === carId);
+        return logs;
+    },
+
+    deleteOdometerLog(id) {
+        const data = this.getAll();
+        data.odometerLogs = data.odometerLogs.filter(o => o.id !== id);
+        this.save(data);
+    },
+
+    // Every known odometer reading for a car (manual, service, fuel), oldest first
+    getOdometerReadings(carId) {
+        const out = [];
+        this.getOdometerLogs(carId).forEach(o => out.push({ km: o.km, date: o.date, source: 'manual' }));
+        this.getServices(carId).forEach(s => { const m = parseInt(s.mileage) || 0; if (m > 0 && s.date) out.push({ km: m, date: s.date, source: 'service' }); });
+        this.getFuelLogs(carId).forEach(f => { const m = parseInt(f.odometer) || 0; if (m > 0 && f.date) out.push({ km: m, date: f.date, source: 'fuel' }); });
+        return out.sort((a, b) => new Date(a.date) - new Date(b.date) || a.km - b.km);
+    },
+
+    // The most recent confirmed reading (what the user actually saw on the dash)
+    getLastReading(car) {
+        const readings = this.getOdometerReadings(car.id);
+        if (readings.length) {
+            const last = readings[readings.length - 1];
+            const carKm = parseInt(car.mileage) || 0;
+            // car.mileage may be newer if it was typed directly on the car record
+            if (carKm > last.km) return { km: carKm, date: car.mileageDate || last.date, source: 'car' };
+            return last;
+        }
+        const carKm = parseInt(car.mileage) || 0;
+        if (carKm > 0) return { km: carKm, date: car.mileageDate || null, source: 'car' };
+        return null;
+    },
+
+    // Average km/day derived from the spread of readings (null when not enough data)
+    getDailyKmRate(carId) {
+        const readings = this.getOdometerReadings(carId);
+        if (readings.length < 2) return null;
+        const first = readings[0], last = readings[readings.length - 1];
+        const days = (new Date(last.date) - new Date(first.date)) / 86400000;
+        const km = last.km - first.km;
+        if (days < 1 || km <= 0) return null;
+        return km / days;
+    },
+
+    // Estimated odometer *right now*: last confirmed reading projected forward
+    // at the car's average daily rate. This is what keeps km-based reminders
+    // counting down between manual updates.
+    getProjectedMileage(car) {
+        const last = this.getLastReading(car);
+        if (!last) return { km: 0, estimated: false, daysSince: 0, rate: null, lastKm: 0, lastDate: null };
+        const rate = this.getDailyKmRate(car.id);
+        const daysSince = last.date ? Math.max(0, Math.floor((new Date() - new Date(last.date)) / 86400000)) : 0;
+        if (!rate || daysSince < 1) {
+            return { km: last.km, estimated: false, daysSince, rate, lastKm: last.km, lastDate: last.date };
+        }
+        return {
+            km: Math.round(last.km + rate * daysSince),
+            estimated: true,
+            daysSince, rate,
+            lastKm: last.km,
+            lastDate: last.date
+        };
+    },
+
+    // Highest known odometer, projected to today — used by all due-date logic
     getEffectiveMileage(car) {
-        let max = parseInt(car.mileage) || 0;
-        this.getServices(car.id).forEach(s => { const m = parseInt(s.mileage) || 0; if (m > max) max = m; });
-        this.getFuelLogs(car.id).forEach(f => { const m = parseInt(f.odometer) || 0; if (m > max) max = m; });
-        return max;
+        return this.getProjectedMileage(car).km;
+    },
+
+    // How stale the odometer is; drives the "update your odometer" nudge
+    getOdometerFreshness(car) {
+        const last = this.getLastReading(car);
+        if (!last || !last.date) return { stale: true, daysSince: null, never: !last };
+        const daysSince = Math.floor((new Date() - new Date(last.date)) / 86400000);
+        return { stale: daysSince >= 30, daysSince, never: false, lastKm: last.km, lastDate: last.date };
     },
 
     updateFuelLog(id, updates) {

@@ -213,20 +213,46 @@ const Recommendations = {
         if (kmRemaining <= 0 || daysRemaining <= 0) status = 'overdue';
         else if (kmRemaining <= rec.km * 0.15 || daysRemaining <= 30) status = 'soon';
 
+        // ── Predict WHEN the km threshold will be reached, using the car's driving rate.
+        // This is what lets a km-based service produce a real calendar due date.
+        const rate = Storage.getDailyKmRate(car.id);
+        let kmDaysRemaining = null, kmEtaDate = null;
+        if (rate && rate > 0) {
+            kmDaysRemaining = Math.round(kmRemaining / rate);
+            const eta = new Date();
+            eta.setDate(eta.getDate() + kmDaysRemaining);
+            kmEtaDate = eta.toISOString().split('T')[0];
+            // A km threshold the driver will hit within a month counts as due soon
+            if (status === 'ok' && kmDaysRemaining <= 30) status = 'soon';
+        }
+
+        // Effective due date = the earlier of the time-based date and the km ETA
+        let dueDate = nextDate.toISOString().split('T')[0];
+        let dueDays = daysRemaining;
+        if (kmEtaDate && kmDaysRemaining !== null && kmDaysRemaining < daysRemaining) {
+            dueDate = kmEtaDate;
+            dueDays = kmDaysRemaining;
+        }
+
+        const fmtDays = d => d <= 0 ? `${Math.abs(d)} days overdue`
+            : d <= 60 ? `in ${d} days`
+            : `in ${Math.round(d / 30)} months`;
+
         let detail;
         if (binding === 'time') {
-            detail = daysRemaining <= 0 ? `${Math.abs(daysRemaining)} days overdue`
-                : daysRemaining <= 60 ? `in ${daysRemaining} days`
-                : `in ${Math.round(daysRemaining / 30)} months`;
+            detail = fmtDays(daysRemaining);
         } else {
             detail = kmRemaining <= 0 ? `${Math.abs(kmRemaining).toLocaleString()} km over`
                 : `${kmRemaining.toLocaleString()} km left`;
+            // add the ETA so a km-based item still reads as a date
+            if (kmDaysRemaining !== null && kmRemaining > 0) detail += ` · ~${fmtDays(kmDaysRemaining).replace('in ', '')}`;
         }
 
         return {
             type, rec, status, binding, detail,
             kmRemaining, daysRemaining, usedPct: Math.round(usedPct),
             nextKm, nextDate: nextDate.toISOString().split('T')[0],
+            kmEtaDate, kmDaysRemaining, dueDate, dueDays, rate,
             lastServiced: last ? last.date : null
         };
     },
