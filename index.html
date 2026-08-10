@@ -118,6 +118,23 @@
     <script src="recommendations.js"></script>
     <script src="features.js"></script>
     <script src="app.js"></script>
-    <script>if('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');</script>
+    <script>
+    if ('serviceWorker' in navigator) {
+        // updateViaCache:'none' stops the browser HTTP-caching sw.js itself, so a new
+        // deploy is always detected; update() forces a check on every load.
+        // Only an *existing* controller being replaced means a new deploy took over;
+        // on a first install there is nothing stale on screen, so no reload is needed.
+        var hadController = !!navigator.serviceWorker.controller;
+        var reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+            if (!hadController || reloaded) return;
+            reloaded = true;
+            location.reload();
+        });
+        navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
+            .then(function (reg) { reg.update(); })
+            .catch(function () {});
+    }
+    </script>
 </body>
 </html>

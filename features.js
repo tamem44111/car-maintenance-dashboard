@@ -362,16 +362,11 @@ const Features = {
             </div>`;
         }
 
-        // Driving pattern
+        // Driving pattern — derived from every odometer reading (manual, service, fuel)
         let driveHTML = '';
-        const fuelLogs = Storage.getFuelLogs(carId).sort((a, b) => new Date(a.date) - new Date(b.date));
-        if (fuelLogs.length >= 2) {
-            const first = fuelLogs[0], last = fuelLogs[fuelLogs.length - 1];
-            const days = Math.max(1, (new Date(last.date) - new Date(first.date)) / 86400000);
-            const totalKm = parseInt(last.odometer) - parseInt(first.odometer);
-            const kmPerDay = (totalKm / days).toFixed(1);
-            const kmPerMonth = (kmPerDay * 30).toFixed(0);
-            driveHTML = `<div class="analytics-row"><div class="card" style="flex:1"><h3>Driving Pattern</h3><div class="drive-stats"><div class="drive-stat"><span class="drive-val">${kmPerDay}</span><span class="drive-label">km/day</span></div><div class="drive-stat"><span class="drive-val">${kmPerMonth}</span><span class="drive-label">km/month</span></div><div class="drive-stat"><span class="drive-val">${(kmPerDay * 365).toFixed(0)}</span><span class="drive-label">km/year (est)</span></div></div></div></div>`;
+        const drive = Storage.getDrivingStats(carId);
+        if (drive) {
+            driveHTML = `<div class="analytics-row"><div class="card" style="flex:1"><h3>Driving Pattern</h3><div class="drive-stats"><div class="drive-stat"><span class="drive-val">${drive.kmPerDay.toFixed(1)}</span><span class="drive-label">km/day</span></div><div class="drive-stat"><span class="drive-val">${drive.kmPerMonth.toFixed(0)}</span><span class="drive-label">km/month</span></div><div class="drive-stat"><span class="drive-val">${drive.kmPerYear.toFixed(0)}</span><span class="drive-label">km/year (est)</span></div></div></div></div>`;
         }
 
         el.innerHTML = pieHTML + driveHTML;

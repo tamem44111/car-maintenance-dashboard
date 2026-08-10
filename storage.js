@@ -219,6 +219,25 @@ const Storage = {
         return this.getProjectedMileage(car).km;
     },
 
+    // Driving pattern from every reading source. For "all cars" the per-car
+    // rates are summed (odometers of different cars can't be differenced).
+    getDrivingStats(carId) {
+        const rateFor = id => this.getDailyKmRate(id);
+        let kmPerDay = null;
+        if (carId && carId !== 'all') {
+            kmPerDay = rateFor(carId);
+        } else {
+            const rates = this.getCars().map(c => rateFor(c.id)).filter(r => r && r > 0);
+            if (rates.length) kmPerDay = rates.reduce((s, r) => s + r, 0);
+        }
+        if (!kmPerDay || kmPerDay <= 0) return null;
+        return {
+            kmPerDay,
+            kmPerMonth: kmPerDay * 30.44,
+            kmPerYear: kmPerDay * 365
+        };
+    },
+
     // How stale the odometer is; drives the "update your odometer" nudge
     getOdometerFreshness(car) {
         const last = this.getLastReading(car);
@@ -352,10 +371,8 @@ const Storage = {
         const total = this.getTotalExpenses(carId);
         const car = this.getCars().find(c => c.id === carId);
         if (!car) return null;
-        const readings = [
-            ...this.getServices(carId).map(s => parseInt(s.mileage) || 0),
-            ...this.getFuelLogs(carId).map(f => parseInt(f.odometer) || 0)
-        ].filter(m => m > 0);
+        // Use every known reading — manual odometer entries included
+        const readings = this.getOdometerReadings(carId).map(r => r.km).filter(m => m > 0);
         if (readings.length < 1) return null;
         const minKm = Math.min(...readings);
         const maxKm = this.getEffectiveMileage(car);
