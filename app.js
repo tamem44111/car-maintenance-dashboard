@@ -148,9 +148,12 @@ const App = {
             const preChecked = !isEdit && presetType === t;
             return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${preChecked?'checked':''} ${isEdit?'disabled':''} onchange="(function(){var o=document.getElementById('oil-options'),c=document.getElementById('svc-oil-change');o.style.display=c&&c.checked?'block':'none'})()"><span class="service-chip-label">${t}</span></label>`;
         }).join('');
-        const selCar = service?service.carId:presetCarId;
+        // Fall back to the car currently filtered, else the first one, so the odometer
+        // can always be pre-filled instead of being typed by hand.
+        const selCar = service ? service.carId
+            : (presetCarId || (this.selectedCarId !== 'all' ? this.selectedCarId : (cars[0] && cars[0].id)) || '');
         const html = `
-            <div class="form-group"><label>Car</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Car</label><select id="f-car" onchange="App._syncServiceMileage()">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-group"><label>${isEdit?'Service Type':'Services Performed (select all that apply)'}</label>
                 ${isEdit?`<select id="f-type" onchange="document.getElementById('oil-options').style.display=this.value==='Oil Change'?'block':'none'">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${t}</option>`).join('')}</select>`:`<div class="service-chips">${chips}</div>`}
             </div>
@@ -167,7 +170,7 @@ const App = {
                 <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
-            <div class="form-group"><label>Mileage at Service (km)</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{}):'')}"></div>
+            <div class="form-group"><label>Mileage at Service (km)</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{})||'':'')}"><small id="smileage-note" class="field-note"></small></div>
             ${Features.renderBillsEditor(service?service.bills:[])}
             <div class="form-group"><label>Notes</label><textarea id="f-notes" rows="2" placeholder="Optional...">${service?service.notes||'':''}</textarea></div>`;
         this.openModal(isEdit?'Edit Service':'Add Service', html, () => {
@@ -199,8 +202,25 @@ const App = {
             Features.cleanupPhotos();
             this.closeModal(); this.renderPage(this.currentPage);
         });
-        // Lock/unlock the cost field to match whether bills are present
-        setTimeout(() => Features.recalcBillTotal(), 40);
+        // Lock/unlock the cost field to match whether bills are present, and
+        // label where the pre-filled odometer came from
+        setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); }, 40);
+    },
+
+    // Pre-fill "Mileage at Service" from the selected car's current reading
+    _syncServiceMileage(keepExisting) {
+        const sel = document.getElementById('f-car');
+        const field = document.getElementById('f-smileage');
+        const note = document.getElementById('smileage-note');
+        if (!sel || !field) return;
+        const car = Storage.getCars().find(c => c.id === sel.value);
+        if (!car) return;
+        const proj = Storage.getProjectedMileage(car);
+        if (!keepExisting) field.value = proj.km || '';
+        if (!note) return;
+        if (!proj.km) note.textContent = 'No odometer reading yet — type the reading from the dashboard.';
+        else if (proj.estimated) note.textContent = `Estimated from ${proj.lastKm.toLocaleString()} km on ${proj.lastDate} — edit if you know the exact reading.`;
+        else note.textContent = 'Your latest confirmed odometer reading — edit if needed.';
     },
 
     _handleOilReminder(data) {
@@ -434,7 +454,7 @@ const App = {
     renderServices() {
         const cid=this.selectedCarId,services=Storage.getServices(cid).sort((a,b)=>new Date(b.date)-new Date(a.date)),cars=Storage.getCars(),el=document.getElementById('services-list');
         if(!services.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M38 14a2 2 0 010 2.8l3.2 3.2a2 2 0 012.8 0l6-6A10 10 0 0136 28L21.2 42.8a4.2 4.2 0 01-6-6L30 22A10 10 0 0144 8l-6 6z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M24 40l-4 4" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" opacity=".4"/></svg></div><p class="empty-state-text">No services recorded</p></div>';return;}
-        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Service</th><th>Mileage</th><th>Bills</th><th>Cost</th><th>Actions</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td>${s.date}</td><td>${car?car.year+' '+car.make+' '+car.model:'?'}</td><td><span class="badge badge-green">${s.type}</span></td><td>${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td>${Features.billsCell(s)}</td><td><strong>${Storage.getServiceCost(s).toFixed(0)} SAR</strong></td><td><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteService('${s.id}');App.renderPage(App.currentPage);}">Del</button></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Service</th><th>Mileage</th><th>Bills</th><th>Cost</th><th>Actions</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td data-label="Date">${s.date}</td><td data-label="Car">${car?car.year+' '+car.make+' '+car.model:'?'}</td><td data-label="Service"><span class="badge badge-green">${s.type}</span></td><td data-label="Mileage">${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td data-label="Bills">${Features.billsCell(s)}</td><td data-label="Cost"><strong>${Storage.getServiceCost(s).toFixed(0)} SAR</strong></td><td data-label="Actions" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this service record?')){Storage.deleteService('${s.id}');Features.cleanupPhotos();App.renderPage(App.currentPage);}">Delete</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Fuel ──
@@ -462,7 +482,7 @@ const App = {
 
         const el=document.getElementById('fuel-list');
         if(!logs.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="12" y="10" width="24" height="40" rx="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M36 24h6a4 4 0 014 4v8a4 4 0 004 4h0a4 4 0 004-4V20l-6-6" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="18" y="18" width="12" height="10" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">No fuel logs yet</p></div>';return;}
-        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Odometer</th><th>Liters</th><th>SAR/L</th><th>Total</th><th>Actions</th></tr></thead><tbody>${logs.map(f=>{const car=cars.find(c=>c.id===f.carId);return `<tr><td>${f.date}</td><td>${car?car.make+' '+car.model:'?'}</td><td>${parseInt(f.odometer).toLocaleString()} km</td><td>${f.liters} L</td><td>${f.pricePerLiter}</td><td><strong>${parseFloat(f.totalCost).toFixed(0)} SAR</strong></td><td><button class="btn btn-secondary btn-sm" onclick="App.openFuelModal(Storage.getFuelLogs().find(x=>x.id==='${f.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteFuelLog('${f.id}');App.renderPage(App.currentPage);}">Del</button></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Odometer</th><th>Liters</th><th>SAR/L</th><th>Total</th><th>Actions</th></tr></thead><tbody>${logs.map(f=>{const car=cars.find(c=>c.id===f.carId);return `<tr><td data-label="Date">${f.date}</td><td data-label="Car">${car?car.make+' '+car.model:'?'}</td><td data-label="Odometer">${parseInt(f.odometer).toLocaleString()} km</td><td data-label="Liters">${f.liters} L</td><td data-label="SAR/L">${f.pricePerLiter}</td><td data-label="Total"><strong>${parseFloat(f.totalCost).toFixed(0)} SAR</strong></td><td data-label="Actions" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openFuelModal(Storage.getFuelLogs().find(x=>x.id==='${f.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this fuel log?')){Storage.deleteFuelLog('${f.id}');App.renderPage(App.currentPage);}">Delete</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Expenses ──
@@ -489,7 +509,7 @@ const App = {
         ].sort((a,b)=>new Date(b.date)-new Date(a.date));
 
         if(!allExpenses.length){el.innerHTML=chartHTML+'<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="20" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M32 20v24M26 24c0-2 2.7-3.5 6-3.5s6 1.5 6 3.5-2.7 3.5-6 3.5-6 1.5-6 3.5 2.7 3.5 6 3.5 6 1.5 6 3.5c0 2-2.7 3.5-6 3.5s-6-1.5-6-3.5" stroke="var(--text3)" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div><p class="empty-state-text">No expenses yet</p></div>';return;}
-        el.innerHTML=chartHTML+`<table><thead><tr><th>Date</th><th>Car</th><th>Description</th><th>Category</th><th>Cost</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td>${e.date}</td><td>${car?car.make+' '+car.model:'?'}</td><td>${e.desc}</td><td><span class="badge ${e.category==='Fuel'?'badge-orange':'badge-green'}">${e.category}</span></td><td><strong>${e.cost.toFixed(0)} SAR</strong></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=chartHTML+`<table><thead><tr><th>Date</th><th>Car</th><th>Description</th><th>Category</th><th>Cost</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td data-label="Date">${e.date}</td><td data-label="Car">${car?car.make+' '+car.model:'?'}</td><td data-label="Description">${e.desc}</td><td data-label="Category"><span class="badge ${e.category==='Fuel'?'badge-orange':'badge-green'}">${e.category}</span></td><td data-label="Cost"><strong>${e.cost.toFixed(0)} SAR</strong></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Reminders ──

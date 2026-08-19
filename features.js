@@ -251,7 +251,10 @@ const Features = {
                     ${warranty.expiryDate ? `<div class="wc-meta-row"><span>Until</span><span>${warranty.expiryDate}</span></div>` : ''}
                     ${warranty.endKm ? `<div class="wc-meta-row"><span>Or at</span><span>${warranty.endKm.toLocaleString()} km</span></div>` : ''}
                 </div>
-                ${bill.photoId ? `<button class="btn btn-secondary btn-sm wc-btn" onclick="Photos.view('${bill.photoId}')">View receipt</button>` : '<div class="wc-noreceipt">No receipt photo attached</div>'}
+                <div class="wc-actions">
+                    ${bill.photoId ? `<button class="btn btn-secondary btn-sm" onclick="Photos.view('${bill.photoId}')">View receipt</button>` : ''}
+                    <button class="btn btn-secondary btn-sm" onclick="App.navigate('services');App.openServiceModal(Storage.getServices().find(x=>x.id==='${bill.serviceId}'))">${bill.photoId ? 'Edit' : 'Add receipt / edit'}</button>
+                </div>
             </div>`;
         };
 
