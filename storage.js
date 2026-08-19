@@ -2,7 +2,7 @@ const Storage = {
     _key: 'autocare_data',
 
     _defaults() {
-        return { cars: [], services: [], reminders: [], fuelLogs: [], odometerLogs: [] };
+        return { cars: [], services: [], reminders: [], fuelLogs: [], odometerLogs: [], trash: [] };
     },
 
     getAll() {
@@ -11,11 +11,105 @@ const Storage = {
         const data = JSON.parse(raw);
         if (!data.fuelLogs) data.fuelLogs = [];
         if (!data.odometerLogs) data.odometerLogs = [];
+        if (!data.trash) data.trash = [];
         return data;
     },
 
     save(data) {
         localStorage.setItem(this._key, JSON.stringify(data));
+        // Stamp every change so the backup nudge knows there is something new to save
+        localStorage.setItem('autocare_lastChange', new Date().toISOString());
+    },
+
+    // ── Backup tracking ──
+    markBackedUp() { localStorage.setItem('autocare_lastBackup', new Date().toISOString()); },
+
+    getBackupStatus() {
+        const lastBackup = localStorage.getItem('autocare_lastBackup');
+        const lastChange = localStorage.getItem('autocare_lastChange');
+        const days = d => Math.floor((Date.now() - new Date(d)) / 86400000);
+        const hasData = this.getCars().length > 0;
+        if (!hasData) return { needed: false, never: !lastBackup, lastBackup, daysSinceBackup: null };
+        if (!lastBackup) return { needed: true, never: true, lastBackup: null, daysSinceBackup: null, unsavedChanges: true };
+        const daysSinceBackup = days(lastBackup);
+        const unsavedChanges = lastChange ? new Date(lastChange) > new Date(lastBackup) : false;
+        return { needed: unsavedChanges && daysSinceBackup >= 30, never: false, lastBackup, daysSinceBackup, unsavedChanges };
+    },
+
+    // ── Trash (30-day undo for deletes) ──
+    TRASH_DAYS: 30,
+
+    _toTrash(kind, arrayKey, id, extras) {
+        const data = this.getAll();
+        const idx = data[arrayKey].findIndex(x => x.id === id);
+        if (idx === -1) return;
+        const [record] = data[arrayKey].splice(idx, 1);
+        data.trash.push({
+            id: 'tr_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+            kind, arrayKey, record,
+            extras: extras || null,
+            deletedAt: new Date().toISOString()
+        });
+        this.save(data);
+    },
+
+    getTrash() {
+        this.purgeTrash();
+        return this.getAll().trash.slice().sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+    },
+
+    // Drop anything past the retention window
+    purgeTrash() {
+        const data = this.getAll();
+        const cutoff = Date.now() - this.TRASH_DAYS * 86400000;
+        const kept = data.trash.filter(t => new Date(t.deletedAt).getTime() >= cutoff);
+        if (kept.length !== data.trash.length) { data.trash = kept; this.save(data); }
+    },
+
+    restoreFromTrash(trashId) {
+        const data = this.getAll();
+        const idx = data.trash.findIndex(t => t.id === trashId);
+        if (idx === -1) return false;
+        const [entry] = data.trash.splice(idx, 1);
+        data[entry.arrayKey].push(entry.record);
+        // A deleted car takes its history with it, so put that back too
+        if (entry.extras) {
+            Object.entries(entry.extras).forEach(([key, rows]) => {
+                if (Array.isArray(rows) && Array.isArray(data[key])) data[key].push(...rows);
+            });
+        }
+        this.save(data);
+        return true;
+    },
+
+    deleteFromTrash(trashId) {
+        const data = this.getAll();
+        data.trash = data.trash.filter(t => t.id !== trashId);
+        this.save(data);
+    },
+
+    // Every bill still referenced by a live OR trashed service (so restores keep photos)
+    getAllReferencedBills() {
+        const data = this.getAll();
+        const out = [];
+        data.services.forEach(s => (s.bills || []).forEach(b => out.push(b)));
+        data.trash.forEach(t => {
+            if (t.record && t.record.bills) t.record.bills.forEach(b => out.push(b));
+            if (t.extras && t.extras.services) t.extras.services.forEach(s => (s.bills || []).forEach(b => out.push(b)));
+        });
+        return out;
+    },
+
+    // ── Duplicate detection ──
+    // Same car, same service type, same date and same odometer is almost always a
+    // double-tap rather than two genuine jobs.
+    findDuplicateService(candidate, ignoreId) {
+        return this.getServices(candidate.carId).find(s =>
+            s.id !== ignoreId &&
+            s.type === candidate.type &&
+            s.date === candidate.date &&
+            String(s.mileage || '') === String(candidate.mileage || '')
+        ) || null;
     },
 
     // --- Cars ---
@@ -36,14 +130,24 @@ const Storage = {
         return data.cars[idx];
     },
 
+    // A car takes its whole history with it, so the trash entry carries the lot
+    // and a restore brings everything back together.
     deleteCar(id) {
         const data = this.getAll();
-        data.cars = data.cars.filter(c => c.id !== id);
+        const car = data.cars.find(c => c.id === id);
+        if (!car) return;
+        const extras = {
+            services: data.services.filter(s => s.carId === id),
+            reminders: data.reminders.filter(r => r.carId === id),
+            fuelLogs: data.fuelLogs.filter(f => f.carId === id),
+            odometerLogs: (data.odometerLogs || []).filter(o => o.carId === id)
+        };
         data.services = data.services.filter(s => s.carId !== id);
         data.reminders = data.reminders.filter(r => r.carId !== id);
         data.fuelLogs = data.fuelLogs.filter(f => f.carId !== id);
         data.odometerLogs = (data.odometerLogs || []).filter(o => o.carId !== id);
         this.save(data);
+        this._toTrash('car', 'cars', id, extras);
     },
 
     // --- Services ---
@@ -68,11 +172,7 @@ const Storage = {
         if (idx !== -1) { data.services[idx] = { ...data.services[idx], ...updates }; this.save(data); }
     },
 
-    deleteService(id) {
-        const data = this.getAll();
-        data.services = data.services.filter(s => s.id !== id);
-        this.save(data);
-    },
+    deleteService(id) { this._toTrash('service', 'services', id); },
 
     // --- Reminders ---
     getReminders(carId) {
@@ -95,11 +195,7 @@ const Storage = {
         if (idx !== -1) { data.reminders[idx] = { ...data.reminders[idx], ...updates }; this.save(data); }
     },
 
-    deleteReminder(id) {
-        const data = this.getAll();
-        data.reminders = data.reminders.filter(r => r.id !== id);
-        this.save(data);
-    },
+    deleteReminder(id) { this._toTrash('reminder', 'reminders', id); },
 
     // --- Fuel Logs ---
     getFuelLogs(carId) {
@@ -252,11 +348,7 @@ const Storage = {
         if (idx !== -1) { data.fuelLogs[idx] = { ...data.fuelLogs[idx], ...updates }; this.save(data); }
     },
 
-    deleteFuelLog(id) {
-        const data = this.getAll();
-        data.fuelLogs = data.fuelLogs.filter(f => f.id !== id);
-        this.save(data);
-    },
+    deleteFuelLog(id) { this._toTrash('fuel', 'fuelLogs', id); },
 
     // --- Bills ---
     // A service may carry several bills (parts from one shop, labour from another).
@@ -449,7 +541,7 @@ const Storage = {
         const horizon = new Date();
         horizon.setMonth(horizon.getMonth() + months);
         const cars = this.getCars().filter(c => carId === 'all' || c.id === carId);
-        const recTypes = ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Air Filter', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs'];
+        const recTypes = Recommendations.ALL_TYPES;
         const seen = new Set();
         const items = [];
 
@@ -511,6 +603,53 @@ const Storage = {
         if (prev > 0) pct = Math.round(((cur - prev) / prev) * 100);
         else if (cur > 0) pct = 100;
         return { current: cur, previous: prev, pct };
+    },
+
+    // ── Keep-or-sell analysis ──
+    // Fuel is deliberately excluded from the verdict: you would pay it on any car,
+    // so it says nothing about whether THIS car is worth keeping. Maintenance does.
+    getOwnershipAnalysis(carId) {
+        const car = this.getCars().find(c => c.id === carId);
+        if (!car) return null;
+        const yearAgo = new Date();
+        yearAgo.setFullYear(yearAgo.getFullYear() - 1);
+
+        let maint12 = 0, fuel12 = 0;
+        this.getServices(carId).forEach(s => { if (s.date && new Date(s.date) >= yearAgo) maint12 += this.getServiceCost(s); });
+        this.getFuelLogs(carId).forEach(f => { if (f.date && new Date(f.date) >= yearAgo) fuel12 += parseFloat(f.totalCost) || 0; });
+
+        // Distance per year. Readings inside the window rarely span a full 12 months,
+        // so scale the observed span up to a year rather than reporting a short span
+        // as if it were annual — otherwise cost-per-km comes out far too high.
+        const readings = this.getOdometerReadings(carId).filter(r => new Date(r.date) >= yearAgo);
+        let km12 = null;
+        if (readings.length >= 2) {
+            const first = readings[0], last = readings[readings.length - 1];
+            const spanDays = (new Date(last.date) - new Date(first.date)) / 86400000;
+            const km = last.km - first.km;
+            if (spanDays >= 1 && km > 0) {
+                km12 = spanDays >= 300 ? km : Math.round((km / spanDays) * 365);
+            }
+        }
+        if (km12 === null) {
+            const rate = this.getDailyKmRate(carId);
+            if (rate) km12 = Math.round(rate * 365);
+        }
+
+        const value = parseFloat(car.marketValue) || 0;
+        const ratio = value > 0 ? maint12 / value : null;
+        let verdict = null, headline = null;
+        if (ratio !== null) {
+            if (ratio < 0.15) { verdict = 'healthy'; headline = 'Worth keeping'; }
+            else if (ratio < 0.30) { verdict = 'watch'; headline = 'Keep an eye on it'; }
+            else { verdict = 'consider'; headline = 'Consider replacing'; }
+        }
+        return {
+            maint12, fuel12, total12: maint12 + fuel12, km12, value, ratio, verdict, headline,
+            maintPerKm: km12 && km12 > 0 ? maint12 / km12 : null,
+            totalPerKm: km12 && km12 > 0 ? (maint12 + fuel12) / km12 : null,
+            hasValue: value > 0
+        };
     },
 
     getCarHealthScore(car) {

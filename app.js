@@ -114,7 +114,21 @@ const App = {
                 <div class="form-group"><label>Insurance Expiry</label><input type="date" id="f-insurance" value="${car?car.insuranceExpiry||'':''}"></div>
                 <div class="form-group"><label>Registration (Istimara) Expiry</label><input type="date" id="f-registration" value="${car?car.registrationExpiry||'':''}"></div>
             </div>
-            <div class="form-group"><label>Manufacturer Warranty Until</label><input type="date" id="f-warranty" value="${car?car.warrantyExpiry||'':''}"></div>
+            <div class="form-row">
+                <div class="form-group"><label>Fahes (Inspection) Expiry</label><input type="date" id="f-fahes" value="${car?car.fahesExpiry||'':''}"><small class="field-note">Istimara renewal needs a valid Fahes and insurance.</small></div>
+                <div class="form-group"><label>Manufacturer Warranty Until</label><input type="date" id="f-warranty" value="${car?car.warrantyExpiry||'':''}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Timing Belt or Chain</label>
+                    <select id="f-timing">
+                        <option value="" ${!car||!car.timingType?'selected':''}>Not sure / skip</option>
+                        <option value="belt" ${car&&car.timingType==='belt'?'selected':''}>Belt — needs replacing</option>
+                        <option value="chain" ${car&&car.timingType==='chain'?'selected':''}>Chain — normally lifetime</option>
+                    </select>
+                    <small class="field-note">A snapped belt can destroy the engine. Only belts are scheduled.</small>
+                </div>
+                <div class="form-group"><label>Market Value (SAR)</label><input type="number" id="f-value" placeholder="e.g. 25000" value="${car?car.marketValue||'':''}"><small class="field-note">Roughly what it would sell for — powers the keep-or-sell view.</small></div>
+            </div>
             <div class="form-group"><label>Recall / Safety Notes</label><textarea id="f-recall" rows="2" placeholder="e.g. Open recall: airbag inflator — book at dealer">${car?car.recallNotes||'':''}</textarea></div>`;
         this.openModal(car?'Edit Car':'Add Car', html, () => {
             const data = {
@@ -127,6 +141,9 @@ const App = {
                 insuranceExpiry: document.getElementById('f-insurance').value,
                 registrationExpiry: document.getElementById('f-registration').value,
                 warrantyExpiry: document.getElementById('f-warranty').value,
+                fahesExpiry: document.getElementById('f-fahes').value,
+                timingType: document.getElementById('f-timing').value,
+                marketValue: document.getElementById('f-value').value.trim(),
                 recallNotes: document.getElementById('f-recall').value.trim(),
             };
             if (!data.make || !data.model || !data.year) return alert('Please fill in make, model, and year.');
@@ -140,13 +157,13 @@ const App = {
     openServiceModal(service = null, presetCarId = null, presetType = null) {
         const cars = Storage.getCars();
         if (!cars.length) return alert('Please add a car first.');
-        const types = ['Oil Change','Tire Rotation','Brake Inspection','Air Filter','Transmission','Coolant Flush','Battery','Spark Plugs','Alignment','Other'];
+        const types = Recommendations.ALL_TYPES.concat(['Other']);
         const isEdit = !!service;
         const isOil = service && service.type === 'Oil Change';
         const chips = types.map(t => {
             const id = 'svc-'+t.toLowerCase().replace(/\s+/g,'-');
             const preChecked = !isEdit && presetType === t;
-            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${preChecked?'checked':''} ${isEdit?'disabled':''} onchange="(function(){var o=document.getElementById('oil-options'),c=document.getElementById('svc-oil-change');o.style.display=c&&c.checked?'block':'none'})()"><span class="service-chip-label">${t}</span></label>`;
+            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${preChecked?'checked':''} ${isEdit?'disabled':''} onchange="App._toggleServiceExtras()"><span class="service-chip-label">${t}</span></label>`;
         }).join('');
         // Fall back to the car currently filtered, else the first one, so the odometer
         // can always be pre-filled instead of being typed by hand.
@@ -155,7 +172,7 @@ const App = {
         const html = `
             <div class="form-group"><label>Car</label><select id="f-car" onchange="App._syncServiceMileage()">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-group"><label>${isEdit?'Service Type':'Services Performed (select all that apply)'}</label>
-                ${isEdit?`<select id="f-type" onchange="document.getElementById('oil-options').style.display=this.value==='Oil Change'?'block':'none'">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${t}</option>`).join('')}</select>`:`<div class="service-chips">${chips}</div>`}
+                ${isEdit?`<select id="f-type" onchange="App._toggleServiceExtras()">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${t}</option>`).join('')}</select>`:`<div class="service-chips">${chips}</div>`}
             </div>
             <div id="oil-options" style="display:${isOil||presetType==='Oil Change'?'block':'none'}">
                 <div class="form-group"><label>Oil Type (next change interval)</label>
@@ -170,6 +187,9 @@ const App = {
                 <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
+            <div id="brake-options" style="display:none">
+                <div class="form-group"><label>Brake Pad Thickness (mm)</label><input type="number" id="f-pad" step="0.5" placeholder="e.g. 7" value="${service&&service.padThickness?service.padThickness:''}"><small class="field-note">New pads are about 10–12 mm; replace at 3 mm. Logging this predicts wear far better than a fixed interval.</small></div>
+            </div>
             <div class="form-group"><label>Mileage at Service (km)</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{})||'':'')}"><small id="smileage-note" class="field-note"></small></div>
             ${Features.renderBillsEditor(service?service.bills:[])}
             <div class="form-group"><label>Notes</label><textarea id="f-notes" rows="2" placeholder="Optional...">${service?service.notes||'':''}</textarea></div>`;
@@ -178,8 +198,13 @@ const App = {
             if(!date) return alert('Please select a date.');
             const car = Storage.getCars().find(c=>c.id===carId);
             const bills = Features.collectBills(mileage);
+            const padEl=document.getElementById('f-pad');
+            const padThickness=padEl?padEl.value.trim():'';
             if(isEdit){
-                const data={carId,type:document.getElementById('f-type').value,date,cost,mileage,notes,bills};
+                const editType=document.getElementById('f-type').value;
+                const dupe=Storage.findDuplicateService({carId,type:editType,date,mileage},service.id);
+                if(dupe && !confirm(`Another ${editType} record already exists for this car on ${date} at the same mileage.\n\nSave anyway?`)) return;
+                const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness};
                 if(data.type==='Oil Change') this._handleOilReminder(data);
                 else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date);
                 Storage.updateService(service.id,data);
@@ -190,8 +215,14 @@ const App = {
                 // service only — splitting it again would double-count. Without bills the
                 // typed cost is shared evenly across the selected services as before.
                 const cps=(!bills.length&&selected.length>1)?(parseFloat(cost)/selected.length).toFixed(2):cost;
+                // Guard against the same job being logged twice by a double-tap
+                const dupes=selected.filter(type=>Storage.findDuplicateService({carId,type,date,mileage}));
+                if(dupes.length){
+                    const list=dupes.join(', ');
+                    if(!confirm(`You already have a record for ${list} on ${date} at this mileage.\n\nAdd it again anyway?`)) return;
+                }
                 selected.forEach((type,i)=>{
-                    const data={carId,type,date,mileage,notes,
+                    const data={carId,type,date,mileage,notes,padThickness,
                         cost: bills.length ? (i===0?cost:'0') : cps,
                         bills: (bills.length&&i===0) ? bills : []};
                     if(type==='Oil Change') this._handleOilReminder(data);
@@ -204,7 +235,19 @@ const App = {
         });
         // Lock/unlock the cost field to match whether bills are present, and
         // label where the pre-filled odometer came from
-        setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); }, 40);
+        setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); this._toggleServiceExtras(); }, 40);
+    },
+
+    // Show the oil-interval / brake-pad extras only for the service types they belong to
+    _toggleServiceExtras() {
+        const sel = document.getElementById('f-type');
+        const picked = sel
+            ? [sel.value]
+            : [...document.querySelectorAll('.service-chips input:checked')].map(c => c.value);
+        const oil = document.getElementById('oil-options');
+        const brake = document.getElementById('brake-options');
+        if (oil) oil.style.display = picked.includes('Oil Change') ? 'block' : 'none';
+        if (brake) brake.style.display = (picked.includes('Brake Pads') || picked.includes('Brake Inspection')) ? 'block' : 'none';
     },
 
     // Pre-fill "Mileage at Service" from the selected car's current reading
@@ -293,7 +336,7 @@ const App = {
     openCustomRecModal(carId) {
         const car=Storage.getCars().find(c=>c.id===carId);
         if(!car)return;
-        const types=['Oil Change','Tire Rotation','Brake Inspection','Air Filter','Transmission','Coolant Flush','Battery','Spark Plugs','Alignment','Other'];
+        const types=Recommendations.ALL_TYPES.concat(['Other']);
         const html=`<p style="font-size:12px;color:var(--text3);margin-bottom:14px">Custom interval for <strong>${car.make} ${car.model}</strong>. Overrides manufacturer data.</p>
             <div class="form-group"><label>Service Type</label><select id="f-rec-type">${types.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
             <div class="form-row"><div class="form-group"><label>Interval (km)</label><input type="number" id="f-rec-km" placeholder="15000"></div><div class="form-group"><label>Interval (months)</label><input type="number" id="f-rec-months" placeholder="12"></div></div>
@@ -395,6 +438,7 @@ const App = {
             let docsHTML='';
             const docs=[];
             if(c.insuranceExpiry){const d=Math.ceil((new Date(c.insuranceExpiry)-new Date())/86400000);docs.push({label:'Insurance',date:c.insuranceExpiry,days:d});}
+            if(c.fahesExpiry){const d=Math.ceil((new Date(c.fahesExpiry)-new Date())/86400000);docs.push({label:'Fahes',date:c.fahesExpiry,days:d});}
             if(c.registrationExpiry){const d=Math.ceil((new Date(c.registrationExpiry)-new Date())/86400000);docs.push({label:'Registration',date:c.registrationExpiry,days:d});}
             if(c.warrantyExpiry){const d=Math.ceil((new Date(c.warrantyExpiry)-new Date())/86400000);docs.push({label:'Warranty',date:c.warrantyExpiry,days:d,warranty:true});}
             if(docs.length){
@@ -406,6 +450,23 @@ const App = {
                     else sb='<span class="badge badge-green">Valid</span>';
                     return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${doc.label}</span><span class="rec-detail">${doc.warranty?'Until':'Expires'} ${doc.date}</span></div><div class="rec-status">${sb}</div></div>`;
                 }).join('')}</div>`;
+            }
+            // Keep-or-sell: maintenance spend over the last year against the car's value
+            let ownHTML='';
+            const own=Storage.getOwnershipAnalysis(c.id);
+            if(own && (own.maint12>0 || own.hasValue)){
+                const vClass=own.verdict==='consider'?'red':own.verdict==='watch'?'orange':'green';
+                ownHTML=`<div class="own-block own-${own.verdict||'none'}">
+                    <div class="own-head"><span class="own-title">Running Cost (last 12 months)</span>${own.headline?`<span class="badge badge-${vClass}">${own.headline}</span>`:''}</div>
+                    <div class="own-stats">
+                        <div class="own-stat"><span class="own-val">${own.maint12.toFixed(0)}</span><span class="own-lab">SAR maintenance</span></div>
+                        <div class="own-stat"><span class="own-val">${own.km12?own.km12.toLocaleString():'—'}</span><span class="own-lab">km per year</span></div>
+                        <div class="own-stat"><span class="own-val">${own.maintPerKm!==null?own.maintPerKm.toFixed(2):'—'}</span><span class="own-lab">SAR/km upkeep</span></div>
+                    </div>
+                    ${own.hasValue
+                        ? `<div class="own-note">Maintenance is <strong>${Math.round(own.ratio*100)}%</strong> of the car's ${own.value.toLocaleString()} SAR value.${own.verdict==='consider'?' Once yearly upkeep passes about a third of what the car is worth, replacing it usually costs less than keeping it.':own.verdict==='watch'?' Worth watching — still cheaper than replacing.':' Comfortably worth keeping.'}</div>`
+                        : `<div class="own-note">Add a market value in Edit to see whether this car is still worth keeping.</div>`}
+                </div>`;
             }
             // Recall / safety notes
             let recallHTML='';
@@ -438,7 +499,7 @@ const App = {
                     <div class="car-detail"><span>Total Spent</span><span>${tc.toFixed(0)} SAR</span></div>
                     ${cpk!==null?`<div class="car-detail"><span>Running Cost</span><span>${cpk.toFixed(2)} SAR/km</span></div>`:''}
                 </div>
-                ${recallHTML}${docsHTML}${recsHTML}${tireHTML}
+                ${recallHTML}${ownHTML}${docsHTML}${recsHTML}${tireHTML}
                 <div class="car-card-actions">
                     <button class="btn btn-secondary btn-sm" onclick="App.openCarModal(Storage.getCars().find(c=>c.id==='${c.id}'))">Edit</button>
                     ${hasRecs?`<button class="btn btn-secondary btn-sm" onclick="App.openCustomRecModal('${c.id}')">+ Custom</button>`:''}

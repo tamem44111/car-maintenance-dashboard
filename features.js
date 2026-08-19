@@ -22,6 +22,8 @@ const Features = {
                 a.download = `autocare-backup-${new Date().toISOString().split('T')[0]}.json`;
                 a.click();
                 URL.revokeObjectURL(url);
+                Storage.markBackedUp();
+                if (App.currentPage === 'dashboard') App.renderPage('dashboard');
             })
             .catch(() => alert('Could not build the backup file.'));
     },
@@ -52,7 +54,7 @@ const Features = {
                         }
                         Storage.save(existing);
                     } else {
-                        Storage.save({ cars: data.cars, services: data.services, reminders: data.reminders, fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [] });
+                        Storage.save({ cars: data.cars, services: data.services, reminders: data.reminders, fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [], trash: data.trash || [] });
                     }
                     if (data.customRecs) localStorage.setItem('autocare_custom_recs', JSON.stringify(data.customRecs));
                     if (data.photos) {
@@ -205,11 +207,12 @@ const Features = {
         }
     },
 
-    // Drop receipt photos no bill references any more
+    // Drop receipt photos no bill references any more. Trashed services still count
+    // as referencing theirs, so restoring a deleted service keeps its receipts.
     cleanupPhotos() {
         if (typeof Photos === 'undefined') return;
         Photos.keys().then(keys => {
-            const used = new Set(Storage.getBills('all').map(b => b.photoId).filter(Boolean));
+            const used = new Set(Storage.getAllReferencedBills().map(b => b.photoId).filter(Boolean));
             keys.forEach(k => { if (!used.has(k)) Photos.remove(k).catch(() => {}); });
         }).catch(() => {});
     },
@@ -362,7 +365,7 @@ const Features = {
 
         const items = [];
         const today = new Date();
-        const recTypes = ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Air Filter', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs'];
+        const recTypes = Recommendations.ALL_TYPES;
 
         cars.forEach(c => {
             const name = `${c.make} ${c.model}`;
@@ -391,10 +394,31 @@ const Features = {
                 if (d < 0) items.push({ priority: 0, icon: 'shield', title: 'Insurance expired', sub: `${name} · expired ${c.insuranceExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
                 else if (d <= 30) items.push({ priority: 1, icon: 'shield', title: `Insurance expires in ${d} days`, sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
+            // Fahes (periodic technical inspection)
+            const fahesDays = c.fahesExpiry ? Math.ceil((new Date(c.fahesExpiry) - today) / 86400000) : null;
+            if (fahesDays !== null) {
+                if (fahesDays < 0) items.push({ priority: 0, icon: 'doc', title: 'Fahes (inspection) expired', sub: `${name} · expired ${c.fahesExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (fahesDays <= 30) items.push({ priority: 1, icon: 'doc', title: `Fahes expires in ${fahesDays} days`, sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+            }
             if (c.registrationExpiry) {
                 const d = Math.ceil((new Date(c.registrationExpiry) - today) / 86400000);
-                if (d < 0) items.push({ priority: 0, icon: 'doc', title: 'Registration (Istimara) expired', sub: `${name} · expired ${c.registrationExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: `Registration expires in ${d} days`, sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                // Istimara renewal needs a valid Fahes and insurance, so say which to do first
+                const insDays = c.insuranceExpiry ? Math.ceil((new Date(c.insuranceExpiry) - today) / 86400000) : null;
+                const blockers = [];
+                if (fahesDays !== null && fahesDays < d) blockers.push('Fahes');
+                if (insDays !== null && insDays < d) blockers.push('insurance');
+                const chain = (d <= 60 && blockers.length) ? ` · renew ${blockers.join(' and ')} first` : '';
+                if (d < 0) items.push({ priority: 0, icon: 'doc', title: 'Registration (Istimara) expired', sub: `${name} · expired ${c.registrationExpiry}${chain}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: `Registration expires in ${d} days`, sub: name + chain, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+            }
+            // Measured brake pad wear beats any fixed interval
+            const padLog = Storage.getServices(c.id)
+                .filter(s => s.padThickness && parseFloat(s.padThickness) > 0)
+                .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+            if (padLog) {
+                const mm = parseFloat(padLog.padThickness);
+                if (mm <= 3) items.push({ priority: 0, icon: 'wrench', title: `Brake pads at ${mm} mm — replace now`, sub: `${name} · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','Brake Pads')` } });
+                else if (mm <= 4.5) items.push({ priority: 1, icon: 'wrench', title: `Brake pads low (${mm} mm)`, sub: `${name} · replace at 3 mm · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','Brake Pads')` } });
             }
             // Warranty
             if (c.warrantyExpiry) {
@@ -423,6 +447,14 @@ const Features = {
             });
         });
 
+        // Backup nudge — everything lives in this browser, so an old backup is a real risk
+        const backup = Storage.getBackupStatus();
+        if (backup.never && cars.length) {
+            items.push({ priority: 1, icon: 'save', title: 'No backup yet', sub: 'Your records live only in this browser — save a copy to Files or iCloud Drive', action: { label: 'Back up', fn: 'Features.exportData()' } });
+        } else if (backup.needed) {
+            items.push({ priority: 1, icon: 'save', title: `Last backup was ${backup.daysSinceBackup} days ago`, sub: 'You have changes since then — save a fresh copy', action: { label: 'Back up', fn: 'Features.exportData()' } });
+        }
+
         items.sort((a, b) => a.priority - b.priority);
 
         if (!items.length) {
@@ -440,7 +472,8 @@ const Features = {
             fuel: '<path d="M3 21V6a2 2 0 012-2h6a2 2 0 012 2v15M13 10h2a2 2 0 012 2v3a2 2 0 002 2 2 2 0 002-2V8l-3-3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
             bell: '<path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/>',
             star: '<path d="M12 3l2.7 5.5 6 .9-4.3 4.2 1 6L12 17l-5.4 2.8 1-6L3.3 9.4l6-.9z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>',
-            gauge: '<path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>'
+            gauge: '<path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>',
+            save: '<path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M8 3v6h7V3M8 21v-6h8v6" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>'
         };
         const pClass = ['ac-critical', 'ac-warning', 'ac-info'];
         const shown = items.slice(0, 6);
@@ -628,12 +661,18 @@ const Features = {
                 <small style="color:var(--text3);display:block;margin-top:4px">Severe climate reduces recommended intervals by 20% (heat accelerates wear)</small>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
-                <label>Data Management</label>
+                <label>Backup</label>
+                <div class="backup-status">${Features.backupStatusLine()}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
                     <button class="btn btn-primary btn-sm" onclick="Features.exportData()">Export Backup</button>
                     <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-file').click()">Import Backup</button>
                     <input type="file" id="import-file" accept=".json" style="display:none" onchange="Features.importData(this.files[0])">
                 </div>
+                <small class="field-note">Everything is stored in this browser only. Save the file to Files or iCloud Drive so a lost phone doesn't take your records with it.</small>
+            </div>
+            <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
+                <label>Recently Deleted</label>
+                <div id="trash-list">${Features.renderTrash()}</div>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>Notifications</label>
@@ -651,6 +690,50 @@ const Features = {
             App.closeModal();
             App.renderPage(App.currentPage);
         });
+    },
+
+    backupStatusLine() {
+        const b = Storage.getBackupStatus();
+        if (b.never) return '<span class="backup-warn">Never backed up</span>';
+        const when = new Date(b.lastBackup).toISOString().split('T')[0];
+        const age = b.daysSinceBackup === 0 ? 'today' : `${b.daysSinceBackup} day${b.daysSinceBackup === 1 ? '' : 's'} ago`;
+        if (b.unsavedChanges) return `<span class="backup-warn">Last backup ${when} (${age}) — changed since</span>`;
+        return `<span class="backup-ok">Last backup ${when} (${age}) — up to date</span>`;
+    },
+
+    // ── Recently Deleted ──
+    renderTrash() {
+        const trash = Storage.getTrash();
+        if (!trash.length) return '<p class="trash-empty">Nothing deleted in the last 30 days.</p>';
+        const describe = t => {
+            const r = t.record || {};
+            if (t.kind === 'car') {
+                const n = t.extras ? (t.extras.services || []).length : 0;
+                return `${r.year || ''} ${r.make || ''} ${r.model || ''}`.trim() + (n ? ` · ${n} service${n > 1 ? 's' : ''}` : '');
+            }
+            if (t.kind === 'service') return `${r.type || 'Service'} · ${r.date || ''} · ${Storage.getServiceCost(r).toFixed(0)} SAR`;
+            if (t.kind === 'fuel') return `Fuel ${r.liters || '?'} L · ${r.date || ''} · ${parseFloat(r.totalCost || 0).toFixed(0)} SAR`;
+            if (t.kind === 'reminder') return `${r.type || 'Reminder'} · due ${r.dueDate || ''}`;
+            return t.kind;
+        };
+        const label = { car: 'Car', service: 'Service', fuel: 'Fuel log', reminder: 'Reminder' };
+        return trash.map(t => {
+            const daysLeft = Storage.TRASH_DAYS - Math.floor((Date.now() - new Date(t.deletedAt)) / 86400000);
+            return `<div class="trash-row">
+                <div class="trash-info">
+                    <div class="trash-title">${label[t.kind] || t.kind}: ${describe(t)}</div>
+                    <div class="trash-sub">Deleted ${new Date(t.deletedAt).toISOString().split('T')[0]} · removed for good in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</div>
+                </div>
+                <button class="btn btn-secondary btn-sm" onclick="Features.restoreTrash('${t.id}')">Restore</button>
+            </div>`;
+        }).join('');
+    },
+
+    restoreTrash(id) {
+        if (!Storage.restoreFromTrash(id)) return;
+        const list = document.getElementById('trash-list');
+        if (list) list.innerHTML = this.renderTrash();
+        App.renderPage(App.currentPage);
     },
 
     // ── Notifications ──

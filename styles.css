@@ -1419,6 +1419,52 @@ tr:hover td { background: var(--card-hover); }
 .warranty-empty-hint { font-size: 12.5px; color: var(--text3); max-width: 380px; margin: 0 auto; line-height: 1.5; }
 
 /* ══════════════════════════════════════════════════
+   KEEP-OR-SELL
+   ══════════════════════════════════════════════════ */
+.own-block {
+    margin-top: 16px;
+    padding: 14px 16px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--border-strong);
+    border-radius: var(--radius-sm);
+}
+.own-block.own-healthy { border-left-color: var(--green); }
+.own-block.own-watch { border-left-color: var(--orange); }
+.own-block.own-consider { border-left-color: var(--red); }
+.own-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
+.own-title {
+    font-size: 10px; font-weight: 700; text-transform: uppercase;
+    letter-spacing: .8px; color: var(--text3);
+}
+.own-stats { display: flex; gap: 10px; }
+.own-stat { flex: 1; text-align: center; }
+.own-val { display: block; font-size: 18px; font-weight: 800; letter-spacing: -.3px; }
+.own-lab { display: block; font-size: 10px; color: var(--text3); margin-top: 2px; }
+.own-note {
+    margin-top: 12px; padding-top: 10px;
+    border-top: 1px solid var(--border);
+    font-size: 11.5px; color: var(--text3); line-height: 1.5;
+}
+.own-note strong { color: var(--text2); }
+
+/* ══════════════════════════════════════════════════
+   BACKUP STATUS & TRASH
+   ══════════════════════════════════════════════════ */
+.backup-status { font-size: 12px; margin-top: 4px; }
+.backup-ok { color: var(--green); font-weight: 600; }
+.backup-warn { color: var(--orange); font-weight: 600; }
+.trash-empty { font-size: 12px; color: var(--text3); }
+.trash-row {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 0; border-bottom: 1px solid var(--border2);
+}
+.trash-row:last-child { border-bottom: none; }
+.trash-info { flex: 1; min-width: 0; }
+.trash-title { font-size: 12.5px; font-weight: 600; }
+.trash-sub { font-size: 10.5px; color: var(--text3); margin-top: 1px; }
+
+/* ══════════════════════════════════════════════════
    RESPONSIVE TABLES → CARDS (phones)
    Each row becomes a labelled card so nothing, including
    the Edit / Delete buttons, can be pushed off-screen.

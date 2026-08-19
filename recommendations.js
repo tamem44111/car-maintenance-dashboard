@@ -1,4 +1,20 @@
 const Recommendations = {
+    // Items that apply to essentially any car. Merged under the brand data so a
+    // manufacturer-specific interval always wins. These also give an unrecognised
+    // make a usable schedule instead of none at all.
+    universal: {
+        'Cabin Air Filter': { km: 15000, months: 12, note: 'More often in dusty conditions' },
+        'AC Service':       { km: 30000, months: 24, note: 'Check refrigerant and cooling performance' },
+        'Brake Pads':       { km: 40000, months: 24, note: 'Wear-dependent — go by measured thickness' },
+        'Timing Belt':      { km: 100000, months: 84, note: 'Critical — a snapped belt can destroy the engine' },
+    },
+
+    // Timing belts only apply to belt-driven engines; a chain is normally lifetime.
+    appliesTo(car, type) {
+        if (type === 'Timing Belt') return car && car.timingType === 'belt';
+        return true;
+    },
+
     database: {
         'ford': {
             '_default': {
@@ -110,11 +126,12 @@ const Recommendations = {
     },
 
     getForCar(make, model) {
-        const m = make.toLowerCase().trim();
-        const md = model.toLowerCase().trim();
+        const m = (make || '').toLowerCase().trim();
+        const md = (model || '').toLowerCase().trim();
         const brand = this.database[m];
-        if (!brand) return null;
-        return brand[md] || brand['_default'] || null;
+        const brandRecs = brand ? (brand[md] || brand['_default'] || {}) : {};
+        const merged = { ...this.universal, ...brandRecs };
+        return Object.keys(merged).length ? merged : null;
     },
 
     getForService(make, model, serviceType) {
@@ -164,10 +181,12 @@ const Recommendations = {
         return rec;
     },
 
+    ALL_TYPES: ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Brake Pads', 'Air Filter', 'Cabin Air Filter', 'AC Service', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs', 'Timing Belt', 'Alignment'],
+
     getAllForCar(car) {
-        const types = ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Air Filter', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs', 'Alignment'];
         const result = {};
-        types.forEach(type => {
+        this.ALL_TYPES.forEach(type => {
+            if (!this.appliesTo(car, type)) return;
             const rec = this.getEffective(car, type);
             if (rec) result[type] = rec;
         });
@@ -177,6 +196,7 @@ const Recommendations = {
     // Full due-status for a service, evaluating BOTH km and time — due on whichever comes first.
     // Returns null if no recommendation exists for this type.
     getMaintenanceStatus(car, type) {
+        if (!this.appliesTo(car, type)) return null;
         const rec = this.getEffective(car, type);
         if (!rec || !rec.km) return null;
 
