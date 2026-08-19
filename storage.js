@@ -258,15 +258,125 @@ const Storage = {
         this.save(data);
     },
 
+    // --- Bills ---
+    // A service may carry several bills (parts from one shop, labour from another).
+    // When bills exist they are the source of truth for cost; otherwise the
+    // manually typed cost is used, so "no bill, just the price" keeps working.
+    getServiceCost(service) {
+        if (!service) return 0;
+        const bills = service.bills || [];
+        if (bills.length) return bills.reduce((sum, b) => sum + (parseFloat(b.amount) || 0), 0);
+        return parseFloat(service.cost) || 0;
+    },
+
+    getBills(carId) {
+        const out = [];
+        this.getServices(carId).forEach(s => {
+            (s.bills || []).forEach(b => out.push({ ...b, serviceId: s.id, serviceType: s.type, carId: s.carId, serviceDate: s.date }));
+        });
+        return out;
+    },
+
+    // Warranty on a purchased part: months and/or km, due on whichever ends first.
+    // km uses the projected odometer, so it stays accurate between manual updates.
+    getWarrantyStatus(bill, car) {
+        if (!bill) return null;
+        const months = parseInt(bill.warrantyMonths) || 0;
+        const km = parseInt(bill.warrantyKm) || 0;
+        if (!months && !km) return null;
+
+        const today = new Date();
+        let daysRemaining = null, expiryDate = null;
+        if (months && bill.date) {
+            const exp = new Date(bill.date);
+            exp.setMonth(exp.getMonth() + months);
+            expiryDate = exp.toISOString().split('T')[0];
+            daysRemaining = Math.ceil((exp - today) / 86400000);
+        }
+
+        let kmRemaining = null, endKm = null;
+        const startKm = parseInt(bill.startKm) || 0;
+        if (km && startKm && car) {
+            endKm = startKm + km;
+            kmRemaining = endKm - this.getEffectiveMileage(car);
+        }
+
+        const expired = (daysRemaining !== null && daysRemaining <= 0) || (kmRemaining !== null && kmRemaining <= 0);
+        const expiring = !expired && (
+            (daysRemaining !== null && daysRemaining <= 60) ||
+            (kmRemaining !== null && kmRemaining <= 2000)
+        );
+
+        // A km-only warranty needs the odometer reading from the day it was bought.
+        // Without it there is nothing to measure against, so say so rather than guess.
+        if (daysRemaining === null && kmRemaining === null) {
+            return {
+                status: 'unknown',
+                detail: 'Add the odometer reading for this service to track it',
+                daysRemaining: null, kmRemaining: null, expiryDate: null, endKm: null, months, km
+            };
+        }
+
+        // Describe by whichever limit is closest to running out
+        let detail;
+        const dRatio = daysRemaining !== null && months ? daysRemaining / (months * 30.44) : Infinity;
+        const kRatio = kmRemaining !== null && km ? kmRemaining / km : Infinity;
+        if (expired) {
+            detail = 'Expired';
+        } else if (kmRemaining !== null && kRatio < dRatio) {
+            detail = `${kmRemaining.toLocaleString()} km left`;
+        } else if (daysRemaining !== null) {
+            detail = daysRemaining <= 60 ? `${daysRemaining} days left` : `${Math.round(daysRemaining / 30)} months left`;
+        } else {
+            detail = `${kmRemaining.toLocaleString()} km left`;
+        }
+
+        return {
+            status: expired ? 'expired' : expiring ? 'expiring' : 'active',
+            detail, daysRemaining, kmRemaining, expiryDate, endKm, months, km
+        };
+    },
+
+    // Every bill that still carries a live warranty, soonest to lapse first
+    getActiveWarranties(carId) {
+        const cars = this.getCars();
+        const out = [];
+        this.getBills(carId).forEach(b => {
+            const car = cars.find(c => c.id === b.carId);
+            const w = this.getWarrantyStatus(b, car);
+            if (w && w.status !== 'expired') out.push({ bill: b, car, warranty: w });
+        });
+        return out.sort((a, b) => {
+            const rank = x => {
+                const d = x.warranty.daysRemaining, k = x.warranty.kmRemaining;
+                const dScore = d !== null ? d : Infinity;
+                const kScore = k !== null ? k / 50 : Infinity;   // ~50 km/day so km compares to days
+                return Math.min(dScore, kScore);
+            };
+            return rank(a) - rank(b);
+        });
+    },
+
+    getExpiredWarranties(carId) {
+        const cars = this.getCars();
+        const out = [];
+        this.getBills(carId).forEach(b => {
+            const car = cars.find(c => c.id === b.carId);
+            const w = this.getWarrantyStatus(b, car);
+            if (w && w.status === 'expired') out.push({ bill: b, car, warranty: w });
+        });
+        return out.sort((a, b) => new Date(b.bill.date) - new Date(a.bill.date));
+    },
+
     // --- Computed ---
     getTotalExpenses(carId) {
-        const serviceCost = this.getServices(carId).reduce((sum, s) => sum + (parseFloat(s.cost) || 0), 0);
+        const serviceCost = this.getServices(carId).reduce((sum, s) => sum + this.getServiceCost(s), 0);
         const fuelCost = this.getFuelLogs(carId).reduce((sum, f) => sum + (parseFloat(f.totalCost) || 0), 0);
         return serviceCost + fuelCost;
     },
 
     getServiceExpenses(carId) {
-        return this.getServices(carId).reduce((sum, s) => sum + (parseFloat(s.cost) || 0), 0);
+        return this.getServices(carId).reduce((sum, s) => sum + this.getServiceCost(s), 0);
     },
 
     getFuelExpenses(carId) {
@@ -317,9 +427,9 @@ const Storage = {
 
     // Average historical cost for a service type (used to estimate upcoming spend)
     getAverageServiceCost(type, carId) {
-        const matches = this.getServices(carId).filter(s => s.type === type && parseFloat(s.cost) > 0);
+        const matches = this.getServices(carId).filter(s => s.type === type && this.getServiceCost(s) > 0);
         if (!matches.length) return null;
-        return matches.reduce((s, x) => s + parseFloat(x.cost), 0) / matches.length;
+        return matches.reduce((s, x) => s + this.getServiceCost(x), 0) / matches.length;
     },
 
     // Fallback estimates (SAR) when no personal history exists yet
@@ -384,7 +494,7 @@ const Storage = {
     // Spend within a given YYYY-MM month
     getMonthlySpend(carId, yearMonth) {
         let total = 0;
-        this.getServices(carId).forEach(s => { if (s.date && s.date.substring(0, 7) === yearMonth) total += parseFloat(s.cost) || 0; });
+        this.getServices(carId).forEach(s => { if (s.date && s.date.substring(0, 7) === yearMonth) total += this.getServiceCost(s); });
         this.getFuelLogs(carId).forEach(f => { if (f.date && f.date.substring(0, 7) === yearMonth) total += parseFloat(f.totalCost) || 0; });
         return total;
     },

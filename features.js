@@ -8,10 +8,22 @@ const Features = {
     exportData() {
         const data = Storage.getAll();
         const custom = localStorage.getItem('autocare_custom_recs');
-        const blob = new Blob([JSON.stringify({ ...data, customRecs: custom ? JSON.parse(custom) : {} }, null, 2)], { type: 'application/json' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a'); a.href = url; a.download = `autocare-backup-${new Date().toISOString().split('T')[0]}.json`;
-        a.click(); URL.revokeObjectURL(url);
+        // Receipt photos live in IndexedDB, so pull them in or a restore would lose them
+        const ids = Storage.getBills('all').map(b => b.photoId).filter(Boolean);
+        Promise.all(ids.map(id => Photos.get(id).then(d => [id, d]).catch(() => [id, null])))
+            .then(pairs => {
+                const photos = {};
+                pairs.forEach(([id, d]) => { if (d) photos[id] = d; });
+                const payload = { ...data, customRecs: custom ? JSON.parse(custom) : {}, photos };
+                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                const url = URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `autocare-backup-${new Date().toISOString().split('T')[0]}.json`;
+                a.click();
+                URL.revokeObjectURL(url);
+            })
+            .catch(() => alert('Could not build the backup file.'));
     },
 
     importData(file) {
@@ -43,12 +55,209 @@ const Features = {
                         Storage.save({ cars: data.cars, services: data.services, reminders: data.reminders, fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [] });
                     }
                     if (data.customRecs) localStorage.setItem('autocare_custom_recs', JSON.stringify(data.customRecs));
+                    if (data.photos) {
+                        Object.entries(data.photos).forEach(([id, d]) => { if (d) Photos.put(id, d).catch(() => {}); });
+                    }
                     alert('Data imported successfully!');
                     App.renderPage(App.currentPage);
                 } else { alert('Invalid backup file.'); }
             } catch (err) { alert('Error reading file: ' + err.message); }
         };
         reader.readAsText(file);
+    },
+
+    // ── Bills & Receipts ──
+    BILL_KINDS: ['Parts', 'Labour', 'Other'],
+
+    // Small indicator in the services table
+    billsCell(service) {
+        const bills = service.bills || [];
+        if (!bills.length) return '<span class="bill-none">No bill</span>';
+        const withPhoto = bills.filter(b => b.photoId).length;
+        return `<span class="bill-count">${bills.length}</span>${withPhoto ? `<span class="bill-cam" title="${withPhoto} receipt photo(s)">&#128247;</span>` : ''}`;
+    },
+
+    _billRowHTML(b) {
+        b = b || {};
+        const rid = 'br_' + Math.random().toString(36).slice(2, 8);
+        return `<div class="bill-row" data-photo="${b.photoId || ''}">
+            <div class="bill-line bill-line-1">
+                <select class="bill-kind">${this.BILL_KINDS.map(k => `<option value="${k}" ${b.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select>
+                <input type="text" class="bill-label" placeholder="What is it for? e.g. Spark plugs" value="${(b.label || '').replace(/"/g, '&quot;')}">
+                <input type="number" class="bill-amount" placeholder="0" step="0.01" value="${b.amount || ''}" oninput="Features.recalcBillTotal()">
+                <button type="button" class="bill-del" title="Remove this bill" onclick="Features.removeBillRow(this)">&times;</button>
+            </div>
+            <div class="bill-line bill-line-2">
+                <input type="text" class="bill-vendor" placeholder="Shop / store name" value="${(b.vendor || '').replace(/"/g, '&quot;')}">
+                <input type="number" class="bill-wmonths" placeholder="Warranty months" value="${b.warrantyMonths || ''}">
+                <input type="number" class="bill-wkm" placeholder="Warranty km" value="${b.warrantyKm || ''}">
+            </div>
+            <div class="bill-line bill-line-3">
+                <input type="file" id="${rid}" accept="image/*" style="display:none" onchange="Features.pickBillPhoto(this)">
+                <button type="button" class="bill-photo-btn" onclick="document.getElementById('${rid}').click()">${b.photoId ? 'Replace receipt' : 'Attach receipt'}</button>
+                <span class="bill-photo-state">${b.photoId ? '<span class="bill-photo-ok">Receipt attached</span>' : ''}</span>
+                ${b.photoId ? `<button type="button" class="bill-photo-view" onclick="Photos.view('${b.photoId}')">View</button>` : ''}
+            </div>
+        </div>`;
+    },
+
+    renderBillsEditor(bills) {
+        const rows = (bills || []).map(b => this._billRowHTML(b)).join('');
+        return `<div class="bills-block">
+            <div class="bills-head">
+                <span class="bills-title">Bills &amp; Receipts</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="Features.addBillRow()">+ Add Bill</button>
+            </div>
+            <p class="bills-hint">Add one row per bill — parts from one shop, labour from another. Leave this empty and just type the cost below if you have no bill.</p>
+            <div id="bills-list">${rows}</div>
+            <div id="bills-total" class="bills-total"></div>
+        </div>`;
+    },
+
+    addBillRow() {
+        const list = document.getElementById('bills-list');
+        if (!list) return;
+        list.insertAdjacentHTML('beforeend', this._billRowHTML({}));
+        this.recalcBillTotal();
+    },
+
+    removeBillRow(btn) {
+        const row = btn.closest('.bill-row');
+        const pid = row.getAttribute('data-photo');
+        if (pid) Photos.remove(pid).catch(() => {});
+        row.remove();
+        this.recalcBillTotal();
+    },
+
+    pickBillPhoto(input) {
+        const file = input.files && input.files[0];
+        if (!file) return;
+        const row = input.closest('.bill-row');
+        const state = row.querySelector('.bill-photo-state');
+        state.innerHTML = '<span class="bill-photo-working">Compressing…</span>';
+        const old = row.getAttribute('data-photo');
+        Photos.save(file).then(id => {
+            if (old) Photos.remove(old).catch(() => {});
+            row.setAttribute('data-photo', id);
+            state.innerHTML = '<span class="bill-photo-ok">Receipt attached</span>';
+            row.querySelector('.bill-photo-btn').textContent = 'Replace receipt';
+            let viewBtn = row.querySelector('.bill-photo-view');
+            if (!viewBtn) {
+                row.querySelector('.bill-line-3').insertAdjacentHTML('beforeend',
+                    `<button type="button" class="bill-photo-view" onclick="Photos.view('${id}')">View</button>`);
+            } else {
+                viewBtn.setAttribute('onclick', `Photos.view('${id}')`);
+            }
+        }).catch(err => {
+            state.innerHTML = `<span class="bill-photo-err">${err.message}</span>`;
+        });
+        input.value = '';
+    },
+
+    collectBills(startKm) {
+        // A km warranty is measured from the odometer at purchase. If the service has
+        // no mileage typed in, fall back to the car's current reading.
+        if (!startKm) {
+            const sel = document.getElementById('f-car');
+            const car = sel ? Storage.getCars().find(c => c.id === sel.value) : null;
+            if (car) startKm = String(Storage.getEffectiveMileage(car) || '');
+        }
+        const out = [];
+        document.querySelectorAll('#bills-list .bill-row').forEach(row => {
+            const amount = row.querySelector('.bill-amount').value;
+            const label = row.querySelector('.bill-label').value.trim();
+            const vendor = row.querySelector('.bill-vendor').value.trim();
+            const wm = row.querySelector('.bill-wmonths').value;
+            const wk = row.querySelector('.bill-wkm').value;
+            const photoId = row.getAttribute('data-photo') || '';
+            // keep a row only if it carries something meaningful
+            if (!amount && !label && !vendor && !photoId) return;
+            out.push({
+                id: 'bl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                kind: row.querySelector('.bill-kind').value,
+                label, vendor, photoId,
+                amount: amount || '0',
+                warrantyMonths: wm || '',
+                warrantyKm: wk || '',
+                startKm: startKm || '',
+                date: document.getElementById('f-date') ? document.getElementById('f-date').value : ''
+            });
+        });
+        return out;
+    },
+
+    recalcBillTotal() {
+        const el = document.getElementById('bills-total');
+        if (!el) return;
+        const rows = document.querySelectorAll('#bills-list .bill-row');
+        let total = 0, n = 0;
+        rows.forEach(r => { const v = parseFloat(r.querySelector('.bill-amount').value); if (!isNaN(v)) { total += v; n++; } });
+        const costField = document.getElementById('f-cost');
+        const note = document.getElementById('cost-note');
+        if (rows.length) {
+            el.innerHTML = `<span>Total from ${rows.length} bill${rows.length > 1 ? 's' : ''}</span><strong>${total.toFixed(2)} SAR</strong>`;
+            if (costField) { costField.value = total.toFixed(2); costField.readOnly = true; costField.classList.add('input-locked'); }
+            if (note) note.textContent = 'Calculated from the bills above.';
+        } else {
+            el.innerHTML = '';
+            if (costField) { costField.readOnly = false; costField.classList.remove('input-locked'); }
+            if (note) note.textContent = 'No bill? Just type the amount you paid.';
+        }
+    },
+
+    // Drop receipt photos no bill references any more
+    cleanupPhotos() {
+        if (typeof Photos === 'undefined') return;
+        Photos.keys().then(keys => {
+            const used = new Set(Storage.getBills('all').map(b => b.photoId).filter(Boolean));
+            keys.forEach(k => { if (!used.has(k)) Photos.remove(k).catch(() => {}); });
+        }).catch(() => {});
+    },
+
+    // ── Warranty Center ──
+    renderWarrantyCenter() {
+        const el = document.getElementById('warranty-list');
+        if (!el) return;
+        const cid = App.selectedCarId;
+        const active = Storage.getActiveWarranties(cid);
+        const expired = Storage.getExpiredWarranties(cid);
+
+        if (!active.length && !expired.length) {
+            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M32 8l18 8v16c0 11-8 19-18 24-10-5-18-13-18-24V16l18-8z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linejoin="round"/><path d="M24 32l6 6 12-13" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div><p class="empty-state-text">No part warranties yet</p><p class="warranty-empty-hint">Add a bill to a service and give it a warranty in months or km — it will appear here.</p></div>`;
+            return;
+        }
+
+        const card = ({ bill, car, warranty }) => {
+            const clsMap = { expired: 'red', expiring: 'orange', unknown: 'blue', active: 'green' };
+            const labelMap = { expired: 'Expired', expiring: 'Ending soon', unknown: 'Not tracked', active: 'Active' };
+            const cls = clsMap[warranty.status] || 'green';
+            const label = labelMap[warranty.status] || 'Active';
+            const terms = [];
+            if (warranty.months) terms.push(`${warranty.months} months`);
+            if (warranty.km) terms.push(`${warranty.km.toLocaleString()} km`);
+            return `<div class="warranty-card wc-${cls}">
+                <div class="wc-head">
+                    <div>
+                        <div class="wc-title">${bill.label || bill.kind}</div>
+                        <div class="wc-sub">${car ? car.make + ' ' + car.model : ''} &middot; ${bill.serviceType}</div>
+                    </div>
+                    <span class="badge badge-${cls}">${label}</span>
+                </div>
+                <div class="wc-remaining">${warranty.detail}</div>
+                <div class="wc-meta">
+                    <div class="wc-meta-row"><span>Shop</span><span>${bill.vendor || '—'}</span></div>
+                    <div class="wc-meta-row"><span>Paid</span><span>${(parseFloat(bill.amount) || 0).toFixed(0)} SAR on ${bill.date || bill.serviceDate || '—'}</span></div>
+                    <div class="wc-meta-row"><span>Cover</span><span>${terms.join(' or ') || '—'}</span></div>
+                    ${warranty.expiryDate ? `<div class="wc-meta-row"><span>Until</span><span>${warranty.expiryDate}</span></div>` : ''}
+                    ${warranty.endKm ? `<div class="wc-meta-row"><span>Or at</span><span>${warranty.endKm.toLocaleString()} km</span></div>` : ''}
+                </div>
+                ${bill.photoId ? `<button class="btn btn-secondary btn-sm wc-btn" onclick="Photos.view('${bill.photoId}')">View receipt</button>` : '<div class="wc-noreceipt">No receipt photo attached</div>'}
+            </div>`;
+        };
+
+        el.innerHTML = `
+            ${active.length ? `<div class="warranty-section-title">Still covered (${active.length})</div><div class="warranty-grid">${active.map(card).join('')}</div>` : ''}
+            ${expired.length ? `<div class="warranty-section-title warranty-section-muted">Expired (${expired.length})</div><div class="warranty-grid">${expired.map(card).join('')}</div>` : ''}`;
     },
 
     // ── Odometer Update ──
@@ -192,6 +401,16 @@ const Features = {
             // Fuel anomaly
             const anomaly = Storage.getFuelAnomaly(c.id);
             if (anomaly) items.push({ priority: 1, icon: 'fuel', title: `Fuel use up ${anomaly.pct}%`, sub: `${name} · ${anomaly.latest} vs ${anomaly.avg} L/100km avg — check tire pressure & air filter`, action: null });
+            // Part warranties about to lapse — worth checking the part before cover ends
+            Storage.getActiveWarranties(c.id).forEach(w => {
+                if (w.warranty.status !== 'expiring') return;
+                items.push({
+                    priority: 2, icon: 'shield',
+                    title: `Warranty ending: ${w.bill.label || w.bill.kind}`,
+                    sub: `${name} · ${w.warranty.detail}${w.bill.vendor ? ' · ' + w.bill.vendor : ''}`,
+                    action: { label: 'View', fn: `App.navigate('warranty')` }
+                });
+            });
             // Manual reminders not covered by the schedule
             Storage.getUpcomingReminders(c.id).forEach(r => {
                 if (r.autoCreated || recTypes.includes(r.type)) return;
@@ -280,7 +499,13 @@ const Features = {
         const fuelTotal = Storage.getFuelExpenses(carId);
         const svcTotal = Storage.getServiceExpenses(carId);
         const cpk = Storage.getCostPerKm(carId);
-        const rows = services.map(s => `<tr><td>${s.date}</td><td>${s.type}</td><td>${s.mileage ? parseInt(s.mileage).toLocaleString() + ' km' : '—'}</td><td>${parseFloat(s.cost || 0).toFixed(0)} SAR</td><td>${s.notes || ''}</td></tr>`).join('');
+        const rows = services.map(s => {
+            const bills = s.bills || [];
+            const detail = bills.length
+                ? bills.map(b => `${b.label || b.kind} — ${b.vendor || 'shop n/a'} — ${(parseFloat(b.amount) || 0).toFixed(0)} SAR`).join('<br>')
+                : (s.notes || '');
+            return `<tr><td>${s.date}</td><td>${s.type}</td><td>${s.mileage ? parseInt(s.mileage).toLocaleString() + ' km' : '—'}</td><td>${Storage.getServiceCost(s).toFixed(0)} SAR</td><td>${detail}</td></tr>`;
+        }).join('');
         const html = `<!DOCTYPE html><html><head><title>Service History — ${car.make} ${car.model}</title>
             <style>
                 body{font-family:'Helvetica Neue',Arial,sans-serif;color:#111;padding:40px;max-width:800px;margin:0 auto;}
@@ -302,7 +527,7 @@ const Features = {
                 <div><span>Fuel Spend</span><strong>${fuelTotal.toFixed(0)} SAR</strong></div>
                 ${cpk ? `<div><span>Running Cost</span><strong>${cpk.toFixed(2)} SAR/km</strong></div>` : ''}
             </div>
-            <table><thead><tr><th>Date</th><th>Service</th><th>Mileage</th><th>Cost</th><th>Notes</th></tr></thead>
+            <table><thead><tr><th>Date</th><th>Service</th><th>Mileage</th><th>Cost</th><th>Bills / Notes</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">No services recorded</td></tr>'}</tbody></table>
             <div class="foot">Generated by AutoCare · Maintenance records for ${car.make} ${car.model}</div>
             </body></html>`;
@@ -327,7 +552,7 @@ const Features = {
         // Expense breakdown pie
         const services = Storage.getServices(carId);
         const byType = {};
-        services.forEach(s => { byType[s.type] = (byType[s.type] || 0) + (parseFloat(s.cost) || 0); });
+        services.forEach(s => { byType[s.type] = (byType[s.type] || 0) + Storage.getServiceCost(s); });
         if (fuelTotal > 0) byType['Fuel'] = fuelTotal;
 
         const colors = ['#4f6ef7', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4f46e5', '#65a30d'];

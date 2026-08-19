@@ -36,11 +36,11 @@ const App = {
         document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
         document.getElementById(`page-${page}`).classList.add('active');
 
-        const titles = { dashboard:'Dashboard', cars:'My Cars', services:'Services', fuel:'Fuel Log', expenses:'Expenses', reminders:'Reminders' };
+        const titles = { dashboard:'Dashboard', cars:'My Cars', services:'Services', fuel:'Fuel Log', expenses:'Expenses', warranty:'Warranty Center', reminders:'Reminders' };
         document.getElementById('page-title').textContent = titles[page];
 
         const addBtn = document.getElementById('add-btn');
-        if (page === 'dashboard') { addBtn.style.display = 'none'; }
+        if (page === 'dashboard' || page === 'warranty') { addBtn.style.display = 'none'; }
         else {
             addBtn.style.display = 'block';
             const labels = { cars:'+ Add Car', services:'+ Add Service', fuel:'+ Add Fuel', expenses:'+ Add Expense', reminders:'+ Add Reminder' };
@@ -57,6 +57,7 @@ const App = {
             case 'services': this.renderServices(); break;
             case 'fuel': this.renderFuel(); break;
             case 'expenses': this.renderExpenses(); break;
+            case 'warranty': Features.renderWarrantyCenter(); break;
             case 'reminders': this.renderReminders(); break;
         }
         this.updateCarSelector();
@@ -164,32 +165,42 @@ const App = {
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}"></div>
-                <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"></div>
+                <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
             <div class="form-group"><label>Mileage at Service (km)</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{}):'')}"></div>
+            ${Features.renderBillsEditor(service?service.bills:[])}
             <div class="form-group"><label>Notes</label><textarea id="f-notes" rows="2" placeholder="Optional...">${service?service.notes||'':''}</textarea></div>`;
         this.openModal(isEdit?'Edit Service':'Add Service', html, () => {
             const carId=document.getElementById('f-car').value, date=document.getElementById('f-date').value, cost=document.getElementById('f-cost').value, mileage=document.getElementById('f-smileage').value, notes=document.getElementById('f-notes').value.trim();
             if(!date) return alert('Please select a date.');
             const car = Storage.getCars().find(c=>c.id===carId);
+            const bills = Features.collectBills(mileage);
             if(isEdit){
-                const data={carId,type:document.getElementById('f-type').value,date,cost,mileage,notes};
+                const data={carId,type:document.getElementById('f-type').value,date,cost,mileage,notes,bills};
                 if(data.type==='Oil Change') this._handleOilReminder(data);
                 else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date);
                 Storage.updateService(service.id,data);
             } else {
                 const selected=[...document.querySelectorAll('.service-chips input:checked')].map(cb=>cb.value);
                 if(!selected.length) return alert('Select at least one service.');
-                const cps=selected.length>1?(parseFloat(cost)/selected.length).toFixed(2):cost;
-                selected.forEach(type=>{
-                    const data={carId,type,date,cost:cps,mileage,notes};
+                // With bills the total is already itemised, so it attaches to the first
+                // service only — splitting it again would double-count. Without bills the
+                // typed cost is shared evenly across the selected services as before.
+                const cps=(!bills.length&&selected.length>1)?(parseFloat(cost)/selected.length).toFixed(2):cost;
+                selected.forEach((type,i)=>{
+                    const data={carId,type,date,mileage,notes,
+                        cost: bills.length ? (i===0?cost:'0') : cps,
+                        bills: (bills.length&&i===0) ? bills : []};
                     if(type==='Oil Change') this._handleOilReminder(data);
                     else if(mileage&&car) Recommendations.createReminderFromService(car,type,mileage,date);
                     Storage.addService(data);
                 });
             }
+            Features.cleanupPhotos();
             this.closeModal(); this.renderPage(this.currentPage);
         });
+        // Lock/unlock the cost field to match whether bills are present
+        setTimeout(() => Features.recalcBillTotal(), 40);
     },
 
     _handleOilReminder(data) {
@@ -330,7 +341,7 @@ const App = {
         // Recent services
         const recentEl=document.getElementById('recent-services');
         const recent=services.sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
-        recentEl.innerHTML=recent.length?recent.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${s.type}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:'?'} &middot; ${s.date}</small></div><div style="font-weight:600;font-size:13px">${parseFloat(s.cost||0).toFixed(0)} SAR</div></div>`;}).join(''):'<p class="empty-state">No services yet</p>';
+        recentEl.innerHTML=recent.length?recent.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${s.type}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:'?'} &middot; ${s.date}</small></div><div style="font-weight:600;font-size:13px">${Storage.getServiceCost(s).toFixed(0)} SAR</div></div>`;}).join(''):'<p class="empty-state">No services yet</p>';
 
         // Upcoming reminders
         const remEl=document.getElementById('upcoming-reminders');
@@ -423,7 +434,7 @@ const App = {
     renderServices() {
         const cid=this.selectedCarId,services=Storage.getServices(cid).sort((a,b)=>new Date(b.date)-new Date(a.date)),cars=Storage.getCars(),el=document.getElementById('services-list');
         if(!services.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M38 14a2 2 0 010 2.8l3.2 3.2a2 2 0 012.8 0l6-6A10 10 0 0136 28L21.2 42.8a4.2 4.2 0 01-6-6L30 22A10 10 0 0144 8l-6 6z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M24 40l-4 4" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" opacity=".4"/></svg></div><p class="empty-state-text">No services recorded</p></div>';return;}
-        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Service</th><th>Mileage</th><th>Cost</th><th>Actions</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td>${s.date}</td><td>${car?car.year+' '+car.make+' '+car.model:'?'}</td><td><span class="badge badge-green">${s.type}</span></td><td>${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td><strong>${parseFloat(s.cost||0).toFixed(0)} SAR</strong></td><td><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteService('${s.id}');App.renderPage(App.currentPage);}">Del</button></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Service</th><th>Mileage</th><th>Bills</th><th>Cost</th><th>Actions</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td>${s.date}</td><td>${car?car.year+' '+car.make+' '+car.model:'?'}</td><td><span class="badge badge-green">${s.type}</span></td><td>${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td>${Features.billsCell(s)}</td><td><strong>${Storage.getServiceCost(s).toFixed(0)} SAR</strong></td><td><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteService('${s.id}');App.renderPage(App.currentPage);}">Del</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Fuel ──
@@ -459,7 +470,7 @@ const App = {
         const cid=this.selectedCarId, services=Storage.getServices(cid).sort((a,b)=>new Date(b.date)-new Date(a.date)), cars=Storage.getCars();
         const svcTotal=Storage.getServiceExpenses(cid), fuelTotal=Storage.getFuelExpenses(cid), grandTotal=svcTotal+fuelTotal;
         const monthlyData={};
-        services.forEach(s=>{const m=s.date?s.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+(parseFloat(s.cost)||0);});
+        services.forEach(s=>{const m=s.date?s.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+Storage.getServiceCost(s);});
         Storage.getFuelLogs(cid).forEach(f=>{const m=f.date?f.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+(parseFloat(f.totalCost)||0);});
         const months=Object.keys(monthlyData).sort().slice(-6), maxVal=Math.max(...months.map(m=>monthlyData[m]),1);
 
@@ -473,7 +484,7 @@ const App = {
         if(months.length>0) chartHTML=`<div class="chart-container"><h3>Monthly Expenses</h3><div class="bar-chart">${months.map(m=>{const pct=(monthlyData[m]/maxVal)*100;return `<div class="bar-group"><span class="bar-value">${monthlyData[m].toFixed(0)}</span><div class="bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${m.substring(5)}</span></div>`;}).join('')}</div></div>`;
 
         const allExpenses=[
-            ...services.map(s=>({date:s.date,carId:s.carId,desc:s.type,cost:parseFloat(s.cost||0),category:'Service'})),
+            ...services.map(s=>({date:s.date,carId:s.carId,desc:s.type+((s.bills&&s.bills.length)?` (${s.bills.length} bill${s.bills.length>1?'s':''})`:''),cost:Storage.getServiceCost(s),category:'Service'})),
             ...Storage.getFuelLogs(cid).map(f=>({date:f.date,carId:f.carId,desc:'Fuel ('+f.liters+' L)',cost:parseFloat(f.totalCost||0),category:'Fuel'}))
         ].sort((a,b)=>new Date(b.date)-new Date(a.date));
 

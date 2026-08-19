@@ -1,5 +1,5 @@
-const CACHE = 'autocare-v7';
-const ASSETS = ['./', './index.html', './styles.css', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
+const CACHE = 'autocare-v8';
+const ASSETS = ['./', './index.html', './styles.css', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
     e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));
