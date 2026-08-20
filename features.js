@@ -525,15 +525,22 @@ const Features = {
                 if (d < 0) items.push({ priority: 0, icon: 'doc', title: 'Registration (Istimara) expired', sub: `${name} · expired ${c.registrationExpiry}${chain}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
                 else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: `Registration expires in ${d} days`, sub: name + chain, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
-            // Measured brake pad wear beats any fixed interval
-            const padLog = Storage.getServices(c.id)
-                .filter(s => s.padThickness && parseFloat(s.padThickness) > 0)
-                .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
-            if (padLog) {
+            // Measured brake pad wear beats any fixed interval. Front and rear wear at
+            // very different rates, so report the latest reading for each separately.
+            const padByAxle = {};
+            Storage.getServices(c.id)
+                .filter(s => s.padThickness && parseFloat(s.padThickness) > 0 && Recommendations.isBrakeType(s.type))
+                .sort((a, b) => new Date(a.date) - new Date(b.date))
+                .forEach(s => { padByAxle[s.type] = s; });
+            Object.values(padByAxle).forEach(padLog => {
                 const mm = parseFloat(padLog.padThickness);
-                if (mm <= 3) items.push({ priority: 0, icon: 'wrench', title: `Brake pads at ${mm} mm — replace now`, sub: `${name} · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','Brake Pads')` } });
-                else if (mm <= 4.5) items.push({ priority: 1, icon: 'wrench', title: `Brake pads low (${mm} mm)`, sub: `${name} · replace at 3 mm · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','Brake Pads')` } });
-            }
+                const axle = padLog.type;
+                if (mm <= 3) {
+                    items.push({ priority: 0, icon: 'wrench', title: `${axle} at ${mm} mm — replace now`, sub: `${name} · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
+                } else if (mm <= 4.5) {
+                    items.push({ priority: 1, icon: 'wrench', title: `${axle} low (${mm} mm)`, sub: `${name} · replace at 3 mm · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
+                }
+            });
             // Warranty
             if (c.warrantyExpiry) {
                 const d = Math.ceil((new Date(c.warrantyExpiry) - today) / 86400000);

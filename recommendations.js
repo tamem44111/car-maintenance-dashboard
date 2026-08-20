@@ -5,7 +5,8 @@ const Recommendations = {
     universal: {
         'Cabin Air Filter': { km: 15000, months: 12, note: 'More often in dusty conditions' },
         'AC Service':       { km: 30000, months: 24, note: 'Check refrigerant and cooling performance' },
-        'Brake Pads':       { km: 40000, months: 24, note: 'Wear-dependent — go by measured thickness' },
+        'Front Brake Pads': { km: 40000, months: 24, note: 'Front does most of the braking — wears fastest' },
+        'Rear Brake Pads':  { km: 70000, months: 36, note: 'Rear wears far slower than front' },
         'Timing Belt':      { km: 100000, months: 84, note: 'Critical — a snapped belt can destroy the engine' },
     },
 
@@ -181,7 +182,18 @@ const Recommendations = {
         return rec;
     },
 
-    ALL_TYPES: ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Brake Pads', 'Air Filter', 'Cabin Air Filter', 'AC Service', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs', 'Timing Belt', 'Alignment'],
+    // Types carrying a schedule
+    ALL_TYPES: ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Front Brake Pads', 'Rear Brake Pads', 'Air Filter', 'Cabin Air Filter', 'AC Service', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs', 'Timing Belt', 'Alignment'],
+
+    // Extra types you can log but that carry no default interval — discs are
+    // replaced on condition rather than mileage, and the plain "Brake Pads" entry
+    // is kept so records made before the front/rear split still work.
+    LOG_ONLY_TYPES: ['Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid', 'Brake Pads', 'Suspension', 'Wheel Bearing'],
+
+    // Everything selectable when logging a job
+    logTypes() { return this.ALL_TYPES.concat(this.LOG_ONLY_TYPES, ['Other']); },
+
+    isBrakeType(t) { return typeof t === 'string' && /brake/i.test(t); },
 
     getAllForCar(car) {
         const result = {};

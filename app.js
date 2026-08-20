@@ -198,7 +198,7 @@ const App = {
     openServiceModal(service = null, presetCarId = null, presetType = null) {
         const cars = Storage.getCars();
         if (!cars.length) return alert('Please add a car first.');
-        const types = Recommendations.ALL_TYPES.concat(['Other']);
+        const types = Recommendations.logTypes();
         const isEdit = !!service;
         const isOil = service && service.type === 'Oil Change';
         const chips = types.map(t => {
@@ -288,7 +288,7 @@ const App = {
         const oil = document.getElementById('oil-options');
         const brake = document.getElementById('brake-options');
         if (oil) oil.style.display = picked.includes('Oil Change') ? 'block' : 'none';
-        if (brake) brake.style.display = (picked.includes('Brake Pads') || picked.includes('Brake Inspection')) ? 'block' : 'none';
+        if (brake) brake.style.display = picked.some(t => Recommendations.isBrakeType(t)) ? 'block' : 'none';
     },
 
     // Pre-fill "Mileage at Service" from the selected car's current reading
@@ -377,7 +377,7 @@ const App = {
     openCustomRecModal(carId) {
         const car=Storage.getCars().find(c=>c.id===carId);
         if(!car)return;
-        const types=Recommendations.ALL_TYPES.concat(['Other']);
+        const types=Recommendations.logTypes();
         const html=`<p style="font-size:12px;color:var(--text3);margin-bottom:14px">Custom interval for <strong>${car.make} ${car.model}</strong>. Overrides manufacturer data.</p>
             <div class="form-group"><label>Service Type</label><select id="f-rec-type">${types.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
             <div class="form-row"><div class="form-group"><label>Interval (km)</label><input type="number" id="f-rec-km" placeholder="15000"></div><div class="form-group"><label>Interval (months)</label><input type="number" id="f-rec-months" placeholder="12"></div></div>
