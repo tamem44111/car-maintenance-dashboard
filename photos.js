@@ -90,17 +90,78 @@ const Photos = {
         return this.compress(file).then(dataUrl => this.put(this.newId(), dataUrl));
     },
 
-    // Open a stored receipt in a viewer window
+    // Show a stored receipt inside the app.
+    // iOS Safari — especially an installed PWA — blocks window.open(), which is why
+    // the old popup viewer failed. This renders an in-app overlay instead.
+    _current: null,
+
     view(id) {
-        this.get(id).then(dataUrl => {
-            if (!dataUrl) return alert('That receipt photo is no longer stored.');
-            const w = window.open('', '_blank');
-            if (!w) return alert('Please allow pop-ups to view the receipt.');
-            w.document.write(`<!DOCTYPE html><html><head><title>Receipt</title><style>
-                body{margin:0;background:#111;display:flex;align-items:center;justify-content:center;min-height:100vh}
-                img{max-width:100%;max-height:100vh;object-fit:contain}
-            </style></head><body><img src="${dataUrl}" alt="Receipt"></body></html>`);
-            w.document.close();
-        }).catch(() => alert('Could not load that receipt photo.'));
+        this.get(id)
+            .then(dataUrl => {
+                if (!dataUrl) { alert('That receipt photo is no longer stored.'); return; }
+                // Grab the blob up front so Save can call share() straight from the tap,
+                // without an await in between that would break the user-gesture chain.
+                return fetch(dataUrl)
+                    .then(r => r.blob())
+                    .then(blob => { this._current = { id, dataUrl, blob }; this._showOverlay(dataUrl); })
+                    .catch(() => { this._current = { id, dataUrl, blob: null }; this._showOverlay(dataUrl); });
+            })
+            .catch(() => alert('Could not load that receipt photo.'));
+    },
+
+    _showOverlay(dataUrl) {
+        let el = document.getElementById('photo-viewer');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'photo-viewer';
+            document.body.appendChild(el);
+        }
+        el.className = 'photo-viewer';
+        el.innerHTML =
+            '<div class="pv-bar">' +
+                '<button type="button" class="pv-btn" onclick="Photos.closeViewer()">Close</button>' +
+                '<span class="pv-hint">Press and hold the image to save it</span>' +
+                '<button type="button" class="pv-btn pv-primary" onclick="Photos.saveImage()">Save</button>' +
+            '</div>' +
+            '<div class="pv-body"><img src="' + dataUrl + '" alt="Receipt"></div>';
+        el.style.display = 'flex';
+        el.onclick = e => { if (e.target === el || e.target.classList.contains('pv-body')) this.closeViewer(); };
+        document.body.style.overflow = 'hidden';
+        this._escHandler = e => { if (e.key === 'Escape') this.closeViewer(); };
+        document.addEventListener('keydown', this._escHandler);
+    },
+
+    closeViewer() {
+        const el = document.getElementById('photo-viewer');
+        if (el) el.style.display = 'none';
+        document.body.style.overflow = '';
+        if (this._escHandler) { document.removeEventListener('keydown', this._escHandler); this._escHandler = null; }
+        this._current = null;
+    },
+
+    // Hand the image to the OS share sheet (iOS: "Save Image" / "Save to Files"),
+    // falling back to a plain download where sharing files is unsupported.
+    saveImage() {
+        const cur = this._current;
+        if (!cur) return;
+        const name = 'receipt-' + (cur.id || 'image') + '.jpg';
+        if (cur.blob && typeof File === 'function' && navigator.canShare) {
+            try {
+                const file = new File([cur.blob], name, { type: 'image/jpeg' });
+                if (navigator.canShare({ files: [file] })) {
+                    navigator.share({ files: [file], title: 'Receipt' }).catch(() => {});
+                    return;
+                }
+            } catch (e) { /* fall through to download */ }
+        }
+        const blob = cur.blob || null;
+        const href = blob ? URL.createObjectURL(blob) : cur.dataUrl;
+        const a = document.createElement('a');
+        a.href = href;
+        a.download = name;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        if (blob) setTimeout(() => URL.revokeObjectURL(href), 1000);
     }
 };
