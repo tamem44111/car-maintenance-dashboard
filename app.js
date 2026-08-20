@@ -4,6 +4,7 @@ const App = {
 
     init() {
         if (typeof I18N !== 'undefined') { I18N.init(); I18N.translateDOM(); }
+        this.bindLanguage();
         this.bindNavigation();
         this.bindModal();
         this.bindCarSelector();
@@ -21,6 +22,23 @@ const App = {
             document.documentElement.setAttribute('data-theme', next);
             localStorage.setItem('autocare_theme', next);
         });
+    },
+
+    // ── Language ──
+    bindLanguage() {
+        const paint = () => document.querySelectorAll('.lang-btn').forEach(b =>
+            b.classList.toggle('active', b.dataset.lang === I18N.lang));
+        document.querySelectorAll('.lang-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                if (btn.dataset.lang === I18N.lang) return;
+                I18N.set(btn.dataset.lang);
+                I18N.translateDOM();
+                paint();
+                this.renderPage(this.currentPage);
+                this.navigate(this.currentPage);
+            });
+        });
+        paint();
     },
 
     // ── Navigation ──
@@ -71,6 +89,7 @@ const App = {
     updateCarSelector() {
         const sel = document.getElementById('car-selector');
         const cars = Storage.getCars();
+        sel.style.display = cars.length > 1 ? '' : 'none';
         sel.innerHTML = '<option value="all">' + t('All Cars') + '</option>' + cars.map(c => `<option value="${c.id}" ${c.id===this.selectedCarId?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('');
     },
 
@@ -405,7 +424,7 @@ const App = {
             const up=trend.pct>0, flat=trend.pct===0;
             const arrow=flat?'→':(up?'▲':'▼');
             const tClass=flat?'trend-flat':(up?'trend-up':'trend-down');
-            trendHTML=`<span class="stat-trend ${tClass}">${arrow} ${Math.abs(trend.pct)}% vs last mo.</span>`;
+            trendHTML=`<span class="stat-trend ${tClass}"><bdi>${arrow} ${Math.abs(trend.pct)}%</bdi> ${t('vs last mo.')}</span>`;
         }
         const expEl=document.getElementById('stat-expenses');
         expEl.innerHTML=total.toFixed(0)+' SAR';
@@ -431,7 +450,7 @@ const App = {
                 const overdueC=Storage.getUpcomingReminders(c.id).filter(r=>new Date(r.dueDate)<new Date()).length;
                 return `<div class="health-card">
                     <div class="health-ring"><svg width="70" height="70" viewBox="0 0 64 64"><circle class="health-ring-bg" cx="32" cy="32" r="28"/><circle class="health-ring-fg ${h.color}" cx="32" cy="32" r="28" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"/></svg><div class="health-score">${h.score}</div></div>
-                    <div class="health-info"><div class="health-car-name">${c.make} ${c.model}</div><div class="health-car-year">${c.year} &middot; ${(()=>{const p=Storage.getProjectedMileage(c);return p.km?(p.estimated?'~':'')+p.km.toLocaleString()+' km':'-';})()}</div><span class="health-label ${h.color}">${h.label}</span><div class="health-details">${svcCount} services${overdueC?` &middot; <span style="color:var(--red)">${overdueC} overdue</span>`:''}</div></div>
+                    <div class="health-info"><div class="health-car-name">${c.make} ${c.model}</div><div class="health-car-year"><bdi>${c.year}</bdi> &middot; <bdi>${(()=>{const p=Storage.getProjectedMileage(c);return p.km?(p.estimated?'~':'')+p.km.toLocaleString()+' km':'-';})()}</bdi></div><span class="health-label ${h.color}">${t(h.label)}</span><div class="health-details">${t('{n} services',{n:svcCount})}${overdueC?` &middot; <span style="color:var(--red)">${t('{n} overdue',{n:overdueC})}</span>`:''}</div></div>
                 </div>`;
             }).join('');
         } else { healthEl.innerHTML=''; }
@@ -526,7 +545,7 @@ const App = {
                 </div>`;
             }
             return `<div class="car-card">
-                <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}">${h.score}% ${h.label}</span></div>
+                <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}"><bdi>${h.score}%</bdi> ${t(h.label)}</span></div>
                 <div class="odo-block ${fresh.stale?'odo-stale':''}">
                     <div class="odo-block-main">
                         <div class="odo-block-label">Odometer${proj.estimated?' <span class="odo-badge">est.</span>':''}</div>

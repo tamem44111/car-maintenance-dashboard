@@ -498,9 +498,9 @@ const Features = {
             // Odometer freshness — km-based reminders are only as good as the last reading
             const fresh = Storage.getOdometerFreshness(c);
             if (fresh.never || fresh.daysSince === null) {
-                items.push({ priority: 1, icon: 'gauge', title: 'Add an odometer reading', sub: `${name} · needed to track km-based services`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
+                items.push({ priority: 1, icon: 'gauge', title: t('Add an odometer reading'), sub: `${name} · ${t('needed to track km-based services')}`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
             } else if (fresh.stale) {
-                items.push({ priority: fresh.daysSince >= 60 ? 1 : 2, icon: 'gauge', title: `Odometer not updated in ${fresh.daysSince} days`, sub: `${name} · last read ${fresh.lastKm.toLocaleString()} km on ${fresh.lastDate}`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
+                items.push({ priority: fresh.daysSince >= 60 ? 1 : 2, icon: 'gauge', title: t('Odometer not updated in {d} days', {d: fresh.daysSince}), sub: `${name} · ${t('last read {km} km on {d}', {km: fresh.lastKm.toLocaleString(), d: fresh.lastDate})}`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
             }
             // Maintenance schedule (whichever comes first)
             recTypes.forEach(type => {
@@ -509,7 +509,7 @@ const Features = {
                 items.push({
                     priority: st.status === 'overdue' ? 0 : 1,
                     icon: 'wrench',
-                    title: `${type} ${st.status === 'overdue' ? 'overdue' : 'due soon'}`,
+                    title: st.status === 'overdue' ? t('{type} overdue', {type: I18N.t(type)}) : t('{type} due soon', {type: I18N.t(type)}),
                     sub: `${name} · ${st.detail}`,
                     action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${type}')` }
                 });
@@ -517,14 +517,14 @@ const Features = {
             // Documents
             if (c.insuranceExpiry) {
                 const d = Math.ceil((new Date(c.insuranceExpiry) - today) / 86400000);
-                if (d < 0) items.push({ priority: 0, icon: 'shield', title: 'Insurance expired', sub: `${name} · expired ${c.insuranceExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (d <= 30) items.push({ priority: 1, icon: 'shield', title: `Insurance expires in ${d} days`, sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                if (d < 0) items.push({ priority: 0, icon: 'shield', title: t('Insurance expired'), sub: `${name} · expired ${c.insuranceExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (d <= 30) items.push({ priority: 1, icon: 'shield', title: t('Insurance expires in {d} days', {d}), sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
             // Fahes (periodic technical inspection)
             const fahesDays = c.fahesExpiry ? Math.ceil((new Date(c.fahesExpiry) - today) / 86400000) : null;
             if (fahesDays !== null) {
-                if (fahesDays < 0) items.push({ priority: 0, icon: 'doc', title: 'Fahes (inspection) expired', sub: `${name} · expired ${c.fahesExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (fahesDays <= 30) items.push({ priority: 1, icon: 'doc', title: `Fahes expires in ${fahesDays} days`, sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                if (fahesDays < 0) items.push({ priority: 0, icon: 'doc', title: t('Fahes (inspection) expired'), sub: `${name} · expired ${c.fahesExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (fahesDays <= 30) items.push({ priority: 1, icon: 'doc', title: t('Fahes expires in {d} days', {d: fahesDays}), sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
             if (c.registrationExpiry) {
                 const d = Math.ceil((new Date(c.registrationExpiry) - today) / 86400000);
@@ -533,9 +533,9 @@ const Features = {
                 const blockers = [];
                 if (fahesDays !== null && fahesDays < d) blockers.push('Fahes');
                 if (insDays !== null && insDays < d) blockers.push('insurance');
-                const chain = (d <= 60 && blockers.length) ? ` · renew ${blockers.join(' and ')} first` : '';
-                if (d < 0) items.push({ priority: 0, icon: 'doc', title: 'Registration (Istimara) expired', sub: `${name} · expired ${c.registrationExpiry}${chain}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: `Registration expires in ${d} days`, sub: name + chain, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                const chain = (d <= 60 && blockers.length) ? ` · ${t('renew {what} first', {what: blockers.map(x => t(x === 'Fahes' ? 'Fahes' : 'Insurance')).join(' + ')})}` : '';
+                if (d < 0) items.push({ priority: 0, icon: 'doc', title: t('Registration (Istimara) expired'), sub: `${name} · expired ${c.registrationExpiry}${chain}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: t('Registration expires in {d} days', {d}), sub: name + chain, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
             // Measured brake pad wear beats any fixed interval. Front and rear wear at
             // very different rates, so report the latest reading for each separately.
@@ -548,27 +548,27 @@ const Features = {
                 const mm = parseFloat(padLog.padThickness);
                 const axle = padLog.type;
                 if (mm <= 3) {
-                    items.push({ priority: 0, icon: 'wrench', title: `${axle} at ${mm} mm — replace now`, sub: `${name} · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
+                    items.push({ priority: 0, icon: 'wrench', title: t('{t} at {mm} mm — replace now', {t: I18N.t(axle), mm}), sub: `${name} · ${t('measured {d}', {d: padLog.date})}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
                 } else if (mm <= 4.5) {
-                    items.push({ priority: 1, icon: 'wrench', title: `${axle} low (${mm} mm)`, sub: `${name} · replace at 3 mm · measured ${padLog.date}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
+                    items.push({ priority: 1, icon: 'wrench', title: t('{t} low ({mm} mm)', {t: I18N.t(axle), mm}), sub: `${name} · ${t('replace at 3 mm')} · ${t('measured {d}', {d: padLog.date})}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
                 }
             });
             // Warranty
             if (c.warrantyExpiry) {
                 const d = Math.ceil((new Date(c.warrantyExpiry) - today) / 86400000);
-                if (d >= 0 && d <= 60) items.push({ priority: 2, icon: 'star', title: `Vehicle warranty ends in ${d} days`, sub: `${name} · use it before it expires`, action: null });
+                if (d >= 0 && d <= 60) items.push({ priority: 2, icon: 'star', title: t('Vehicle warranty ends in {d} days', {d}), sub: `${name} · ${t('use it before it expires')}`, action: null });
             }
             // Fuel anomaly
             const anomaly = Storage.getFuelAnomaly(c.id);
-            if (anomaly) items.push({ priority: 1, icon: 'fuel', title: `Fuel use up ${anomaly.pct}%`, sub: `${name} · ${anomaly.latest} vs ${anomaly.avg} L/100km avg — check tire pressure & air filter`, action: null });
+            if (anomaly) items.push({ priority: 1, icon: 'fuel', title: t('Fuel use up {p}%', {p: anomaly.pct}), sub: `${name} · ${anomaly.latest} vs ${anomaly.avg} L/100km avg — check tire pressure & air filter`, action: null });
             // Tyre age — rubber degrades with heat and time, not just tread wear
             const tyre = Storage.getTyreAge(c);
             if (tyre && tyre.status !== 'ok') {
                 items.push({
                     priority: tyre.status === 'replace' ? 0 : 1,
                     icon: 'shield',
-                    title: tyre.status === 'replace' ? `Tyres are ${tyre.years} years old — replace` : `Tyres are ${tyre.years} years old`,
-                    sub: `${name} · made ${tyre.madeOn} · rubber hardens with age regardless of tread`,
+                    title: tyre.status === 'replace' ? t('Tyres are {y} years old — replace', {y: tyre.years}) : t('Tyres are {y} years old', {y: tyre.years}),
+                    sub: `${name} · ${tyre.madeOn} · ${t('rubber hardens with age regardless of tread')}`,
                     action: { label: 'Tyres', fn: `Features.openTireModal('${c.id}')` }
                 });
             }
@@ -577,7 +577,7 @@ const Features = {
                 if (w.warranty.status !== 'expiring') return;
                 items.push({
                     priority: 2, icon: 'shield',
-                    title: `Warranty ending: ${w.bill.label || w.bill.kind}`,
+                    title: t('Warranty ending: {part}', {part: w.bill.label || I18N.t(w.bill.kind)}),
                     sub: `${name} · ${w.warranty.detail}${w.bill.vendor ? ' · ' + w.bill.vendor : ''}`,
                     action: { label: 'View', fn: `App.navigate('warranty')` }
                 });
@@ -594,9 +594,9 @@ const Features = {
         // Backup nudge — everything lives in this browser, so an old backup is a real risk
         const backup = Storage.getBackupStatus();
         if (backup.never && cars.length) {
-            items.push({ priority: 1, icon: 'save', title: 'No backup yet', sub: 'Your records live only in this browser — save a copy to Files or iCloud Drive', action: { label: 'Back up', fn: 'Features.exportData()' } });
+            items.push({ priority: 1, icon: 'save', title: t('No backup yet'), sub: t('Your records live only in this browser — save a copy to Files or iCloud Drive'), action: { label: t('Back up'), fn: 'Features.exportData()' } });
         } else if (backup.needed) {
-            items.push({ priority: 1, icon: 'save', title: `Last backup was ${backup.daysSinceBackup} days ago`, sub: 'You have changes since then — save a fresh copy', action: { label: 'Back up', fn: 'Features.exportData()' } });
+            items.push({ priority: 1, icon: 'save', title: t('Last backup was {d} days ago', {d: backup.daysSinceBackup}), sub: t('You have changes since then — save a fresh copy'), action: { label: t('Back up'), fn: 'Features.exportData()' } });
         }
 
         items.sort((a, b) => a.priority - b.priority);
@@ -622,14 +622,14 @@ const Features = {
         const pClass = ['ac-critical', 'ac-warning', 'ac-info'];
         const shown = items.slice(0, 6);
         el.innerHTML = `<div class="action-center-card">
-            <div class="ac-header"><span class="ac-title">${t("Action Center")}</span><span class="ac-count">${items.length} item${items.length > 1 ? 's' : ''}</span></div>
+            <div class="ac-header"><span class="ac-title">${t("Action Center")}</span><span class="ac-count">${items.length > 1 ? t('{n} items', {n: items.length}) : t('{n} item', {n: items.length})}</span></div>
             <div class="ac-list">${shown.map(it => `
                 <div class="ac-item ${pClass[it.priority]}">
                     <span class="ac-icon"><svg viewBox="0 0 24 24" width="18" height="18">${icons[it.icon]}</svg></span>
                     <div class="ac-text"><div class="ac-item-title">${it.title}</div><div class="ac-item-sub">${it.sub}</div></div>
                     ${it.action ? `<button class="btn btn-sm btn-secondary ac-btn" onclick="${it.action.fn}">${it.action.label}</button>` : ''}
                 </div>`).join('')}
-                ${items.length > 6 ? `<div class="ac-more">+ ${items.length - 6} more</div>` : ''}
+                ${items.length > 6 ? `<div class="ac-more">${t('+ {n} more', {n: items.length - 6})}</div>` : ''}
             </div>
         </div>`;
     },
