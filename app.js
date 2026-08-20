@@ -248,6 +248,19 @@ const App = {
                 <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
+            <div id="inspection-options" style="display:none">
+                <div class="form-row">
+                    <div class="form-group"><label>${t('Result')}</label>
+                        <select id="f-insp-result">
+                            <option value="pass" ${service&&service.inspectionResult==='pass'?'selected':''}>${t('Passed')}</option>
+                            <option value="advisory" ${service&&service.inspectionResult==='advisory'?'selected':''}>${t('Passed with advisories')}</option>
+                            <option value="fail" ${service&&service.inspectionResult==='fail'?'selected':''}>${t('Failed')}</option>
+                        </select>
+                    </div>
+                    <div class="form-group"><label>${t('Certificate valid until')}</label><input type="date" id="f-insp-expiry" value="${service&&service.inspectionExpiry?service.inspectionExpiry:''}"><small class="field-note">${t('Updates the Fahes date on your car')}</small></div>
+                </div>
+                <div class="form-group"><label>${t('Inspection centre')}</label><input type="text" id="f-insp-centre" placeholder="${t('e.g. Fahes Al-Kharj Road')}" value="${service&&service.inspectionCenter?String(service.inspectionCenter).replace(/"/g,'&quot;'):''}"></div>
+            </div>
             <div id="brake-options" style="display:none">
                 <div class="form-group"><label>Brake Pad Thickness (mm)</label><input type="number" id="f-pad" step="0.5" placeholder="e.g. 7" value="${service&&service.padThickness?service.padThickness:''}"><small class="field-note">New pads are about 10–12 mm; replace at 3 mm. Logging this predicts wear far better than a fixed interval.</small></div>
             </div>
@@ -261,11 +274,18 @@ const App = {
             const bills = Features.collectBills(mileage);
             const padEl=document.getElementById('f-pad');
             const padThickness=padEl?padEl.value.trim():'';
+            const inspEl=document.getElementById('f-insp-result');
+            const insp = inspEl ? {
+                inspectionResult: inspEl.value,
+                inspectionExpiry: document.getElementById('f-insp-expiry').value,
+                inspectionCenter: document.getElementById('f-insp-centre').value.trim()
+            } : {};
             if(isEdit){
                 const editType=document.getElementById('f-type').value;
                 const dupe=Storage.findDuplicateService({carId,type:editType,date,mileage},service.id);
                 if(dupe && !confirm(`Another ${editType} record already exists for this car on ${date} at the same mileage.\n\nSave anyway?`)) return;
-                const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness};
+                const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness,
+                    ...(Recommendations.isInspectionType(editType)?insp:{})};
                 if(data.type==='Oil Change') this._handleOilReminder(data);
                 else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date);
                 Storage.updateService(service.id,data);
@@ -285,18 +305,53 @@ const App = {
                 selected.forEach((type,i)=>{
                     const data={carId,type,date,mileage,notes,padThickness,
                         cost: bills.length ? (i===0?cost:'0') : cps,
-                        bills: (bills.length&&i===0) ? bills : []};
+                        bills: (bills.length&&i===0) ? bills : [],
+                        ...(Recommendations.isInspectionType(type)?insp:{})};
                     if(type==='Oil Change') this._handleOilReminder(data);
                     else if(mileage&&car) Recommendations.createReminderFromService(car,type,mileage,date);
                     Storage.addService(data);
                 });
             }
+            this._applyInspection(carId, insp, date);
             Features.cleanupPhotos();
             this.closeModal(); this.renderPage(this.currentPage);
         });
         // Lock/unlock the cost field to match whether bills are present, and
         // label where the pre-filled odometer came from
         setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); this._toggleServiceExtras(); }, 40);
+    },
+
+    // A logged inspection is the authority on when the certificate expires, so it
+    // updates the car's Fahes date. A failure means a re-test is owed, not a
+    // year of cover, so that instead becomes a reminder.
+    _applyInspection(carId, insp, serviceDate) {
+        if (!insp || !insp.inspectionResult) return;
+        const car = Storage.getCars().find(c => c.id === carId);
+        if (!car) return;
+
+        if (insp.inspectionResult === 'fail') {
+            const retest = new Date(serviceDate || new Date());
+            retest.setDate(retest.getDate() + 30);
+            const due = retest.toISOString().split('T')[0];
+            const existing = Storage.getReminders(carId)
+                .find(r => r.type === 'Inspection' && r.retest && !r.completed);
+            if (existing) Storage.updateReminder(existing.id, { dueDate: due });
+            else Storage.addReminder({
+                carId, type: 'Inspection', dueDate: due, dueMileage: '',
+                notes: t('Re-test after a failed inspection'),
+                completed: false, autoCreated: true, retest: true
+            });
+            return;
+        }
+
+        if (insp.inspectionExpiry) {
+            Storage.updateCar(carId, { fahesExpiry: insp.inspectionExpiry });
+            Storage.syncDocumentReminders(carId);
+            // a pass clears any outstanding re-test
+            Storage.getReminders(carId)
+                .filter(r => r.type === 'Inspection' && r.retest && !r.completed)
+                .forEach(r => Storage.updateReminder(r.id, { completed: true }));
+        }
     },
 
     // Show the oil-interval / brake-pad extras only for the service types they belong to
@@ -309,6 +364,19 @@ const App = {
         const brake = document.getElementById('brake-options');
         if (oil) oil.style.display = picked.includes('Oil Change') ? 'block' : 'none';
         if (brake) brake.style.display = picked.some(t => Recommendations.isBrakeType(t)) ? 'block' : 'none';
+        const insp = document.getElementById('inspection-options');
+        if (insp) {
+            const on = picked.some(t => Recommendations.isInspectionType(t));
+            insp.style.display = on ? 'block' : 'none';
+            // default the certificate to a year from the service date
+            const exp = document.getElementById('f-insp-expiry');
+            const dateEl = document.getElementById('f-date');
+            if (on && exp && !exp.value && dateEl && dateEl.value) {
+                const d = new Date(dateEl.value);
+                d.setFullYear(d.getFullYear() + 1);
+                exp.value = d.toISOString().split('T')[0];
+            }
+        }
     },
 
     // Pre-fill "Mileage at Service" from the selected car's current reading
@@ -487,11 +555,11 @@ const App = {
                     const st=Recommendations.getMaintenanceStatus(c,type);
                     if(!st) return '';
                     const sClass=st.status==='overdue'?'red':st.status==='soon'?'orange':'green';
-                    const sLabel=st.status==='overdue'?'Overdue':st.status==='soon'?'Soon':'OK';
+                    const sLabel=t(st.status==='overdue'?'Overdue':st.status==='soon'?'Soon':'OK');
                     return `<div class="rec-row2">
                         <div class="rec-top"><span class="rec-type">${I18N.t(type)}</span><span class="badge badge-${sClass}">${sLabel}</span></div>
                         <div class="rec-progress"><div class="rec-progress-bar ${sClass}" style="width:${Math.min(100,st.usedPct)}%"></div></div>
-                        <div class="rec-meta"><span class="rec-detail">Every ${st.rec.km.toLocaleString()} km / ${st.rec.months||12} mo</span><span class="rec-next">${st.detail}</span></div>
+                        <div class="rec-meta"><span class="rec-detail">${t('Every {km} km / {m} mo',{km:st.rec.km.toLocaleString(),m:st.rec.months||12})}</span><span class="rec-next">${st.detail}</span></div>
                     </div>`;
                 }).join('')}</div>`;
             }
@@ -499,17 +567,23 @@ const App = {
             let docsHTML='';
             const docs=[];
             if(c.insuranceExpiry){const d=Math.ceil((new Date(c.insuranceExpiry)-new Date())/86400000);docs.push({label:'Insurance',date:c.insuranceExpiry,days:d});}
-            if(c.fahesExpiry){const d=Math.ceil((new Date(c.fahesExpiry)-new Date())/86400000);docs.push({label:'Fahes',date:c.fahesExpiry,days:d});}
+            if(c.fahesExpiry){
+                const d=Math.ceil((new Date(c.fahesExpiry)-new Date())/86400000);
+                const lastInsp=Storage.getServices(c.id).filter(s=>Recommendations.isInspectionType(s.type)&&s.inspectionResult)
+                    .sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+                docs.push({label:'Fahes',date:c.fahesExpiry,days:d,
+                    extra:lastInsp?{result:lastInsp.inspectionResult,centre:lastInsp.inspectionCenter,on:lastInsp.date}:null});
+            }
             if(c.registrationExpiry){const d=Math.ceil((new Date(c.registrationExpiry)-new Date())/86400000);docs.push({label:'Registration',date:c.registrationExpiry,days:d});}
             if(c.warrantyExpiry){const d=Math.ceil((new Date(c.warrantyExpiry)-new Date())/86400000);docs.push({label:'Warranty',date:c.warrantyExpiry,days:d,warranty:true});}
             if(docs.length){
                 docsHTML=`<div class="car-recs"><div class="car-recs-title">${t("Documents")}</div>${docs.map(doc=>{
                     let sb='';
-                    if(doc.warranty){sb=doc.days<0?'<span class="badge badge-red">Expired</span>':'<span class="badge badge-blue">Active</span>';}
-                    else if(doc.days<0)sb='<span class="badge badge-red">Expired</span>';
-                    else if(doc.days<=30)sb=`<span class="badge badge-orange">${doc.days}d left</span>`;
-                    else sb='<span class="badge badge-green">Valid</span>';
-                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${I18N.t(doc.label)}</span><span class="rec-detail">${doc.warranty?'Until':'Expires'} ${doc.date}</span></div><div class="rec-status">${sb}</div></div>`;
+                    if(doc.warranty){sb=doc.days<0?`<span class="badge badge-red">${t('Expired')}</span>`:`<span class="badge badge-blue">${t('Active')}</span>`;}
+                    else if(doc.days<0)sb=`<span class="badge badge-red">${t('Expired')}</span>`;
+                    else if(doc.days<=30)sb=`<span class="badge badge-orange">${t('{d}d left',{d:doc.days})}</span>`;
+                    else sb=`<span class="badge badge-green">${t('Valid')}</span>`;
+                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${I18N.t(doc.label)}</span><span class="rec-detail">${doc.warranty?t('Until'):t('Expires')} ${doc.date}</span>${doc.extra?`<span class="rec-detail insp-note ${doc.extra.result}">${t(doc.extra.result==='fail'?'Last inspection failed':doc.extra.result==='advisory'?'Passed with advisories':'Passed')} &middot; ${doc.extra.on}${doc.extra.centre?' &middot; '+doc.extra.centre:''}</span>`:''}</div><div class="rec-status">${sb}</div></div>`;
                 }).join('')}</div>`;
             }
             // Keep-or-sell: maintenance spend over the last year against the car's value

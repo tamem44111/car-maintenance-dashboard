@@ -1973,3 +1973,9 @@ tr:hover td { background: var(--card-hover); }
 [dir="rtl"] .odo-block-sub,
 [dir="rtl"] .trash-sub,
 [dir="rtl"] .insight-nums { unicode-bidi: plaintext; }
+
+/* Inspection result shown under the Fahes document row */
+.insp-note{display:block;margin-top:2px;font-weight:600}
+.insp-note.pass{color:var(--green)}
+.insp-note.advisory{color:var(--orange)}
+.insp-note.fail{color:var(--red)}

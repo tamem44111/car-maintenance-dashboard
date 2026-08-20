@@ -188,12 +188,16 @@ const Recommendations = {
     // Extra types you can log but that carry no default interval — discs are
     // replaced on condition rather than mileage, and the plain "Brake Pads" entry
     // is kept so records made before the front/rear split still work.
-    LOG_ONLY_TYPES: ['Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid', 'Brake Pads', 'Suspension', 'Wheel Bearing'],
+    LOG_ONLY_TYPES: ['Periodic Inspection', 'Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid', 'Brake Pads', 'Suspension', 'Wheel Bearing'],
 
     // Everything selectable when logging a job
     logTypes() { return this.ALL_TYPES.concat(this.LOG_ONLY_TYPES, ['Other']); },
 
     isBrakeType(t) { return typeof t === 'string' && /brake/i.test(t); },
+
+    // The periodic technical inspection (Fahes) is date-driven, not mileage-driven,
+    // so it carries no km interval — the certificate's own expiry date governs it.
+    isInspectionType(t) { return t === 'Periodic Inspection'; },
 
     getAllForCar(car) {
         const result = {};
@@ -266,18 +270,19 @@ const Recommendations = {
             dueDays = kmDaysRemaining;
         }
 
-        const fmtDays = d => d <= 0 ? `${Math.abs(d)} days overdue`
-            : d <= 60 ? `in ${d} days`
-            : `in ${Math.round(d / 30)} months`;
+        const T = (s, v) => (typeof I18N !== 'undefined' ? I18N.t(s, v) : s);
+        const fmtDays = d => d <= 0 ? T('{d} days overdue', {d: Math.abs(d)})
+            : d <= 60 ? T('in {d} days', {d})
+            : T('in {m} months', {m: Math.round(d / 30)});
 
         let detail;
         if (binding === 'time') {
             detail = fmtDays(daysRemaining);
         } else {
-            detail = kmRemaining <= 0 ? `${Math.abs(kmRemaining).toLocaleString()} km over`
-                : `${kmRemaining.toLocaleString()} km left`;
+            detail = kmRemaining <= 0 ? T('{km} km over', {km: Math.abs(kmRemaining).toLocaleString()})
+                : T('{km} km left', {km: kmRemaining.toLocaleString()});
             // add the ETA so a km-based item still reads as a date
-            if (kmDaysRemaining !== null && kmRemaining > 0) detail += ` · ~${fmtDays(kmDaysRemaining).replace('in ', '')}`;
+            if (kmDaysRemaining !== null && kmRemaining > 0) detail += ' · ~' + fmtDays(kmDaysRemaining).replace('in ', '').replace('خلال ', '');
         }
 
         return {
