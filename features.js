@@ -412,6 +412,64 @@ const Features = {
         document.getElementById('odo-warn').innerHTML = '';
     },
 
+    // ── Service Insights ──
+    // What the records already know but never said: how the interval you actually
+    // achieve compares with the recommended one, and what that habit costs a year.
+    renderServiceInsights(carId) {
+        const el = document.getElementById('insights-section');
+        if (!el) return;
+        const groups = Storage.getServiceInsights(carId);
+        if (!groups.length) {
+            el.innerHTML = '<div class="card"><h3>Service Insights</h3>' +
+                '<p class="insight-empty">Log the same service twice, each with its mileage, ' +
+                'and this will compare the interval you actually achieve against the recommended one.</p></div>';
+            return;
+        }
+        const badge = { frequent: 'blue', onschedule: 'green', stretched: 'orange' };
+        const esc = v => String(v);
+
+        const rowHTML = (i) => {
+            const parts = [];
+            parts.push('<div class="insight-row">');
+            parts.push('<div class="insight-top"><span class="insight-type">' + esc(i.type) + '</span>');
+            if (i.verdict) parts.push('<span class="badge badge-' + badge[i.verdict] + '">' + esc(i.note) + '</span>');
+            parts.push('</div>');
+
+            parts.push('<div class="insight-nums">');
+            parts.push('<span>You: <strong>' + i.avgKm.toLocaleString() + ' km</strong></span>');
+            if (i.recKm) parts.push('<span>Recommended: <strong>' + i.recKm.toLocaleString() + ' km</strong></span>');
+            if (i.avgCost) parts.push('<span>Avg cost: <strong>' + i.avgCost.toFixed(0) + ' SAR</strong></span>');
+            parts.push('</div>');
+
+            if (i.ratio !== null) {
+                // bar is scaled so the recommended interval sits at the fixed mark
+                const w = Math.max(3, Math.min(100, i.ratio * 62.5));
+                parts.push('<div class="insight-bar"><div class="insight-bar-fill ' + i.verdict +
+                           '" style="width:' + w.toFixed(1) + '%"></div><span class="insight-bar-mark"></span></div>');
+            }
+
+            if (i.yearlyDelta && i.yearlyDelta > 50) {
+                const times = i.perYear ? i.perYear.toFixed(1) : '?';
+                const wouldBe = (i.perYear && i.ratio) ? (i.perYear * i.ratio).toFixed(1) : '?';
+                parts.push('<div class="insight-note">About <strong>' + Math.round(i.yearlyDelta) +
+                           ' SAR a year</strong> more than following the schedule — roughly ' + times +
+                           ' times a year instead of ' + wouldBe + '. Reasonable on a high-mileage engine if it is deliberate.</div>');
+            } else if (i.verdict === 'stretched' && i.ratio) {
+                parts.push('<div class="insight-note">Running about ' + Math.round((i.ratio - 1) * 100) +
+                           '% past the recommended interval.</div>');
+            }
+
+            parts.push('</div>');
+            return parts.join('');
+        };
+
+        el.innerHTML = groups.map(g =>
+            '<div class="card insight-card"><h3>Service Insights' +
+            (groups.length > 1 ? ' — ' + esc(g.carName) : '') + '</h3>' +
+            '<div class="insight-list">' + g.items.map(rowHTML).join('') + '</div></div>'
+        ).join('');
+    },
+
     // ── Action Center (prioritized "do this now") ──
     renderActionCenter(carId) {
         const el = document.getElementById('action-center');
@@ -484,6 +542,17 @@ const Features = {
             // Fuel anomaly
             const anomaly = Storage.getFuelAnomaly(c.id);
             if (anomaly) items.push({ priority: 1, icon: 'fuel', title: `Fuel use up ${anomaly.pct}%`, sub: `${name} · ${anomaly.latest} vs ${anomaly.avg} L/100km avg — check tire pressure & air filter`, action: null });
+            // Tyre age — rubber degrades with heat and time, not just tread wear
+            const tyre = Storage.getTyreAge(c);
+            if (tyre && tyre.status !== 'ok') {
+                items.push({
+                    priority: tyre.status === 'replace' ? 0 : 1,
+                    icon: 'shield',
+                    title: tyre.status === 'replace' ? `Tyres are ${tyre.years} years old — replace` : `Tyres are ${tyre.years} years old`,
+                    sub: `${name} · made ${tyre.madeOn} · rubber hardens with age regardless of tread`,
+                    action: { label: 'Tyres', fn: `Features.openTireModal('${c.id}')` }
+                });
+            }
             // Part warranties about to lapse — worth checking the part before cover ends
             Storage.getActiveWarranties(c.id).forEach(w => {
                 if (w.warranty.status !== 'expiring') return;
@@ -710,6 +779,7 @@ const Features = {
         el.innerHTML = `<div class="quick-bar">
             <button class="quick-btn quick-btn-primary" onclick="Features.openOdometerModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/></svg> Update km</button>
             <button class="quick-btn" onclick="App.openFuelModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/><path d="M13 10h2a2 2 0 012 2v3a2 2 0 002 2v0a2 2 0 002-2V8l-3-3" stroke="currentColor" stroke-width="2" fill="none"/></svg> Quick Fuel</button>
+            <button class="quick-btn" onclick="App.openRepeatPicker()" title="Log a job you've done before"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 12a9 9 0 0115-6.7L21 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 01-15 6.7L3 16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M3 21v-5h5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> Repeat</button>
             <button class="quick-btn" onclick="App.openServiceModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg> Quick Service</button>
             <button class="quick-btn" onclick="App.openReminderModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none"/></svg> Add Reminder</button>
             <button class="quick-btn" onclick="Features.exportData()" title="Save a backup file"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M8 3v6h7V3M8 21v-6h8v6" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg> Back Up</button>
@@ -744,6 +814,10 @@ const Features = {
                 <div id="trash-list">${Features.renderTrash()}</div>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
+                <label>Receipt Storage</label>
+                <div id="storage-usage" class="backup-status">Checking…</div>
+            </div>
+            <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>Notifications</label>
                 <button class="btn btn-secondary btn-sm" id="btn-notif" onclick="Features.requestNotifications()">Enable Browser Notifications</button>
             </div>
@@ -752,6 +826,16 @@ const Features = {
                 <div id="mechanics-list" style="margin-bottom:8px">${Features.renderMechanicsList()}</div>
                 <button class="btn btn-secondary btn-sm" onclick="Features.addMechanicRow()">+ Add Mechanic</button>
             </div>`;
+        setTimeout(() => {
+            const el = document.getElementById('storage-usage');
+            if (!el) return;
+            Photos.usage().then(u => {
+                const mb = u.bytes / 1048576;
+                el.innerHTML = u.count
+                    ? `${u.count} receipt${u.count > 1 ? 's' : ''} using about ${mb.toFixed(1)} MB`
+                    : 'No receipt photos stored yet';
+            }).catch(() => { el.textContent = 'Could not read storage usage'; });
+        }, 40);
         App.openModal('Settings', html, () => {
             const cl = document.getElementById('f-climate').value;
             localStorage.setItem('autocare_climate', cl);
@@ -895,6 +979,11 @@ const Features = {
                 <div class="form-group"><label>Installed at (km)</label><input type="number" id="f-tire-km" placeholder="45000" value="${tires.installedMileage}"></div>
             </div>
             <div class="form-group">
+                <label>Manufacture Date (DOT)</label>
+                <input type="month" id="f-tire-made" value="${tires.manufactureDate || ''}">
+                <small class="field-note">From the 4-digit DOT code on the sidewall — e.g. 2419 means week 24 of 2019. Heat hardens rubber, so tyres are usually replaced by 6 years old whatever the tread looks like.</small>
+            </div>
+            <div class="form-group">
                 <label>Rotation Pattern</label>
                 <select id="f-tire-pattern">
                     <option value="cross" ${tires.pattern === 'cross' ? 'selected' : ''}>Cross pattern (FL&#8596;RR, FR&#8596;RL)</option>
@@ -914,6 +1003,7 @@ const Features = {
                 installedDate: document.getElementById('f-tire-date').value,
                 installedMileage: document.getElementById('f-tire-km').value,
                 pattern: document.getElementById('f-tire-pattern').value,
+                manufactureDate: document.getElementById('f-tire-made').value,
                 warrantyKm: document.getElementById('f-tire-warranty').value,
             };
             Storage.updateCar(carId, { tires: data });

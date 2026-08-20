@@ -605,6 +605,124 @@ const Storage = {
         return { current: cur, previous: prev, pct };
     },
 
+    // ── Reminder status ──
+    // Reminders carry both a due date and a due odometer. Judging them on the date
+    // alone made the Reminders page disagree with the maintenance schedule — a
+    // reminder already past its km target could still read "In 789d".
+    getReminderStatus(reminder, car) {
+        const today = new Date();
+        let daysRemaining = null;
+        if (reminder.dueDate) daysRemaining = Math.ceil((new Date(reminder.dueDate) - today) / 86400000);
+
+        let kmRemaining = null, kmDays = null;
+        const dueKm = parseInt(reminder.dueMileage) || 0;
+        if (dueKm && car) {
+            kmRemaining = dueKm - this.getEffectiveMileage(car);
+            const rate = this.getDailyKmRate(car.id);
+            if (rate && rate > 0) kmDays = Math.round(kmRemaining / rate);
+        }
+
+        const overdue = (daysRemaining !== null && daysRemaining <= 0) ||
+                        (kmRemaining !== null && kmRemaining <= 0);
+        const horizons = [daysRemaining, kmDays].filter(v => v !== null);
+        const effDays = horizons.length ? Math.min(...horizons) : null;
+        const soon = !overdue && effDays !== null && effDays <= 7;
+
+        // Describe by whichever limit runs out first
+        const kmIsBinding = kmDays !== null && (daysRemaining === null || kmDays < daysRemaining);
+        let detail;
+        if (overdue) {
+            if (kmRemaining !== null && kmRemaining <= 0) detail = Math.abs(kmRemaining).toLocaleString() + ' km over';
+            else detail = Math.abs(daysRemaining) + 'd overdue';
+        } else if (kmIsBinding) {
+            detail = kmRemaining.toLocaleString() + ' km left';
+        } else if (daysRemaining !== null) {
+            detail = daysRemaining === 0 ? 'Due today' : 'In ' + daysRemaining + 'd';
+        } else {
+            detail = '—';
+        }
+
+        return {
+            status: reminder.completed ? 'done' : overdue ? 'overdue' : soon ? 'soon' : 'ok',
+            detail, daysRemaining, kmRemaining, effDays, kmIsBinding
+        };
+    },
+
+    // ── Service insights ──
+    // Compares the interval you actually achieve against the recommended one, using
+    // the mileage on your own records. Everything needed is already stored; this
+    // just surfaces it.
+    getServiceInsights(carId) {
+        const cars = this.getCars().filter(c => carId === 'all' || c.id === carId);
+        const groups = [];
+        cars.forEach(car => {
+            const byType = {};
+            this.getServices(car.id).forEach(s => {
+                if (!s.mileage || !s.date) return;
+                (byType[s.type] = byType[s.type] || []).push(s);
+            });
+            const rate = this.getDailyKmRate(car.id);
+            const kmPerYear = rate ? rate * 365 : null;
+            const items = [];
+            Object.entries(byType).forEach(([type, list]) => {
+                list.sort((a, b) => parseInt(a.mileage) - parseInt(b.mileage));
+                const costs = list.map(s => this.getServiceCost(s)).filter(c => c > 0);
+                const avgCost = costs.length ? costs.reduce((a, b) => a + b, 0) / costs.length : null;
+                const gaps = [];
+                for (let i = 1; i < list.length; i++) {
+                    const km = parseInt(list[i].mileage) - parseInt(list[i - 1].mileage);
+                    if (km > 0) gaps.push(km);
+                }
+                if (!gaps.length) return;                       // need at least two to compare
+                const avgKm = gaps.reduce((a, b) => a + b, 0) / gaps.length;
+                const rec = Recommendations.getEffective(car, type);
+                const recKm = rec && rec.km ? rec.km : null;
+                const ratio = recKm ? avgKm / recKm : null;
+
+                let verdict = null, note = null, yearlyDelta = null;
+                if (ratio !== null) {
+                    if (ratio < 0.7) {
+                        verdict = 'frequent';
+                        note = 'More often than the schedule asks';
+                        if (kmPerYear && avgCost) {
+                            yearlyDelta = ((kmPerYear / avgKm) - (kmPerYear / recKm)) * avgCost;
+                        }
+                    } else if (ratio <= 1.15) {
+                        verdict = 'onschedule'; note = 'Matching the schedule';
+                    } else {
+                        verdict = 'stretched'; note = 'Going further than recommended';
+                    }
+                }
+                items.push({
+                    type, count: list.length, avgKm: Math.round(avgKm), recKm, ratio, verdict, note,
+                    avgCost, lastCost: costs.length ? costs[costs.length - 1] : null,
+                    firstCost: costs.length ? costs[0] : null,
+                    yearlyDelta, perYear: kmPerYear && avgKm ? kmPerYear / avgKm : null
+                });
+            });
+            items.sort((a, b) => (b.yearlyDelta || 0) - (a.yearlyDelta || 0) || a.type.localeCompare(b.type));
+            if (items.length) groups.push({ car, carName: car.make + ' ' + car.model, items });
+        });
+        return groups;
+    },
+
+    // ── Tyre age ──
+    // Rubber hardens with heat and time regardless of tread depth, which matters
+    // more here than tread wear does.
+    getTyreAge(car) {
+        const t = car && car.tires;
+        const made = t && (t.manufactureDate || '');
+        if (!made) return null;
+        const d = new Date(made + (made.length === 7 ? '-01' : ''));
+        if (isNaN(d)) return null;
+        const years = (Date.now() - d) / (365.25 * 86400000);
+        return {
+            years: Math.round(years * 10) / 10,
+            madeOn: made,
+            status: years >= 6 ? 'replace' : years >= 5 ? 'ageing' : 'ok'
+        };
+    },
+
     // ── Keep-or-sell analysis ──
     // Fuel is deliberately excluded from the verdict: you would pay it on any car,
     // so it says nothing about whether THIS car is worth keeping. Maintenance does.

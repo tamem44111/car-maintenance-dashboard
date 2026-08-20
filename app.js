@@ -80,6 +80,7 @@ const App = {
         document.getElementById('modal').addEventListener('click', (e) => { if (e.target === document.getElementById('modal')) this.closeModal(); });
     },
     openModal(title, bodyHTML, onSave) {
+        document.getElementById('modal-save').style.display = '';
         document.getElementById('modal-title').textContent = title;
         document.getElementById('modal-body').innerHTML = bodyHTML;
         document.getElementById('modal').style.display = 'flex';
@@ -151,6 +152,46 @@ const App = {
             else Storage.addCar(data);
             this.closeModal(); this.renderPage(this.currentPage);
         });
+    },
+
+    // Log a recurring job again in two taps: pick the type, everything else is
+    // carried over from last time with today's date and the current odometer.
+    openRepeatPicker() {
+        const cars = Storage.getCars();
+        if (!cars.length) return alert('Please add a car first.');
+        const cid = this.selectedCarId !== 'all' ? this.selectedCarId : cars[0].id;
+        const seen = {};
+        Storage.getServices(cid)
+            .slice().sort((a, b) => new Date(b.date) - new Date(a.date))
+            .forEach(s => { if (!seen[s.type]) seen[s.type] = s; });
+        const recent = Object.values(seen).slice(0, 8);
+        if (!recent.length) return this.openServiceModal(null, cid);
+        const car = cars.find(c => c.id === cid);
+        const km = Storage.getEffectiveMileage(car);
+        const html = `<p class="odo-intro">Pick a job you've done before. It opens pre-filled with today's date and ${km ? km.toLocaleString() + ' km' : 'the current reading'} — change anything before saving.</p>
+            <div class="repeat-list">${recent.map(s => {
+                const since = km && s.mileage ? km - parseInt(s.mileage) : null;
+                return `<button type="button" class="repeat-row" onclick="App.repeatService('${s.id}')">
+                    <span class="repeat-type">${s.type}</span>
+                    <span class="repeat-meta">last ${s.date}${since && since > 0 ? ' · ' + since.toLocaleString() + ' km ago' : ''}${Storage.getServiceCost(s) ? ' · ' + Storage.getServiceCost(s).toFixed(0) + ' SAR' : ''}</span>
+                </button>`;
+            }).join('')}</div>`;
+        this.openModal('Repeat a Service', html, () => this.closeModal());
+        setTimeout(() => { const f = document.getElementById('modal-save'); if (f) f.style.display = 'none'; }, 20);
+    },
+
+    repeatService(id) {
+        const prev = Storage.getServices('all').find(s => s.id === id);
+        if (!prev) return;
+        this.closeModal();
+        document.getElementById('modal-save').style.display = '';
+        setTimeout(() => {
+            this.openServiceModal(null, prev.carId, prev.type);
+            setTimeout(() => {
+                const cost = document.getElementById('f-cost');
+                if (cost && !cost.readOnly && !cost.value) cost.value = Storage.getServiceCost(prev) || '';
+            }, 80);
+        }, 60);
     },
 
     // ── Service Modal ──
@@ -542,7 +583,7 @@ const App = {
         } else { chartEl.style.display='none'; }
 
         const el=document.getElementById('fuel-list');
-        if(!logs.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="12" y="10" width="24" height="40" rx="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M36 24h6a4 4 0 014 4v8a4 4 0 004 4h0a4 4 0 004-4V20l-6-6" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="18" y="18" width="12" height="10" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">No fuel logs yet</p></div>';return;}
+        if(!logs.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="12" y="10" width="24" height="40" rx="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M36 24h6a4 4 0 014 4v8a4 4 0 004 4h0a4 4 0 004-4V20l-6-6" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="18" y="18" width="12" height="10" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">No fuel logs yet</p><p class="warranty-empty-hint">Logging fill-ups unlocks consumption tracking (L/100km), true cost per kilometre, and an early warning when fuel use jumps \u2014 often the first sign of low tyre pressure, a clogged filter or a failing sensor.</p></div>';return;}
         el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Odometer</th><th>Liters</th><th>SAR/L</th><th>Total</th><th>Actions</th></tr></thead><tbody>${logs.map(f=>{const car=cars.find(c=>c.id===f.carId);return `<tr><td data-label="Date">${f.date}</td><td data-label="Car">${car?car.make+' '+car.model:'?'}</td><td data-label="Odometer">${parseInt(f.odometer).toLocaleString()} km</td><td data-label="Liters">${f.liters} L</td><td data-label="SAR/L">${f.pricePerLiter}</td><td data-label="Total"><strong>${parseFloat(f.totalCost).toFixed(0)} SAR</strong></td><td data-label="Actions" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openFuelModal(Storage.getFuelLogs().find(x=>x.id==='${f.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this fuel log?')){Storage.deleteFuelLog('${f.id}');App.renderPage(App.currentPage);}">Delete</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
@@ -560,6 +601,7 @@ const App = {
             <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${svcTotal.toFixed(0)} SAR</span><span class="stat-label">Maintenance</span></div></div>
             <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${fuelTotal.toFixed(0)} SAR</span><span class="stat-label">Fuel</span></div></div>`;
 
+        if(typeof Features!=='undefined') Features.renderServiceInsights(cid);
         const el=document.getElementById('expenses-list');
         let chartHTML='';
         if(months.length>0) chartHTML=`<div class="chart-container"><h3>Monthly Expenses</h3><div class="bar-chart">${months.map(m=>{const pct=(monthlyData[m]/maxVal)*100;return `<div class="bar-group"><span class="bar-value">${monthlyData[m].toFixed(0)}</span><div class="bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${m.substring(5)}</span></div>`;}).join('')}</div></div>`;
@@ -575,15 +617,18 @@ const App = {
 
     // ── Render: Reminders ──
     renderReminders() {
-        const cid=this.selectedCarId, reminders=Storage.getReminders(cid).sort((a,b)=>new Date(a.dueDate)-new Date(b.dueDate)), cars=Storage.getCars(), el=document.getElementById('reminders-list');
+        const cid=this.selectedCarId, reminders=Storage.getReminders(cid).sort((a,b)=>{const ca=Storage.getCars().find(c=>c.id===a.carId),cb=Storage.getCars().find(c=>c.id===b.carId);const sa=Storage.getReminderStatus(a,ca).effDays,sb=Storage.getReminderStatus(b,cb).effDays;return (sa===null?1e9:sa)-(sb===null?1e9:sb);}), cars=Storage.getCars(), el=document.getElementById('reminders-list');
         if(!reminders.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M44 26a12 12 0 00-24 0c0 14-6 18-6 18h36s-6-4-6-18" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M35.46 48a4 4 0 01-6.92 0" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="32" cy="14" r="2" fill="var(--text3)" opacity=".4"/></svg></div><p class="empty-state-text">No reminders set</p></div>';return;}
         el.innerHTML=reminders.map(r=>{
-            const car=cars.find(c=>c.id===r.carId), days=Math.ceil((new Date(r.dueDate)-new Date())/86400000);
-            let sc='',sl='';
-            if(r.completed){sl='<span class="badge badge-green">Done</span>';}
-            else if(days<0){sc='overdue';sl=`<span class="badge badge-red">${Math.abs(days)}d overdue</span>`;}
-            else if(days<=7){sc='soon';sl=`<span class="badge badge-orange">${days===0?'Due today':'Due in '+days+'d'}</span>`;}
-            else{sl=`<span class="badge badge-blue">In ${days}d</span>`;}
+            const car=cars.find(c=>c.id===r.carId);
+            // Judge on km AND date together, so this page cannot disagree with the
+            // maintenance schedule about the same item.
+            const st=Storage.getReminderStatus(r,car);
+            const badgeMap={done:'green',overdue:'red',soon:'orange',ok:'blue'};
+            const sc=st.status==='overdue'?'overdue':st.status==='soon'?'soon':'';
+            const sl=r.completed
+                ?'<span class="badge badge-green">Done</span>'
+                :`<span class="badge badge-${badgeMap[st.status]}">${st.detail}</span>`;
             return `<div class="reminder-card ${sc}"><div class="reminder-card-header"><span class="reminder-card-title">${r.type}</span>${sl}</div><div class="reminder-card-car">${car?car.year+' '+car.make+' '+car.model:''}</div><div class="reminder-card-date">Due: ${r.dueDate}${r.dueMileage?' or at '+parseInt(r.dueMileage).toLocaleString()+' km':''}</div>${r.notes?`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${r.notes}</div>`:''}<div class="reminder-card-actions">${!r.completed?`<button class="btn btn-primary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:true});App.renderPage(App.currentPage);">Done</button>`:`<button class="btn btn-secondary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:false});App.renderPage(App.currentPage);">Undo</button>`}<button class="btn btn-secondary btn-sm" onclick="App.openReminderModal(Storage.getReminders().find(x=>x.id==='${r.id}'))">Edit</button><button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteReminder('${r.id}');App.renderPage(App.currentPage);}">Del</button></div></div>`;
         }).join('');
     }
