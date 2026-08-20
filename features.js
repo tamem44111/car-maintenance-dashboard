@@ -5,17 +5,53 @@
 const Features = {
 
     // ── Export/Import ──
+    // Everything that makes the app behave as configured must ride along: the
+    // records, custom intervals, the settings that change how intervals are
+    // calculated, and every receipt image (which lives in IndexedDB, not here).
+    SETTING_KEYS: { climate: 'autocare_climate', mechanics: 'autocare_mechanics', theme: 'autocare_theme' },
+
+    collectSettings() {
+        const raw = k => localStorage.getItem(k);
+        return {
+            climate: raw(this.SETTING_KEYS.climate) || 'normal',
+            mechanics: JSON.parse(raw(this.SETTING_KEYS.mechanics) || '[]'),
+            theme: raw(this.SETTING_KEYS.theme) || 'light'
+        };
+    },
+
+    applySettings(settings) {
+        if (!settings) return 0;
+        let n = 0;
+        if (settings.climate) { localStorage.setItem(this.SETTING_KEYS.climate, settings.climate); n++; }
+        if (Array.isArray(settings.mechanics)) { localStorage.setItem(this.SETTING_KEYS.mechanics, JSON.stringify(settings.mechanics)); n++; }
+        if (settings.theme) {
+            localStorage.setItem(this.SETTING_KEYS.theme, settings.theme);
+            document.documentElement.setAttribute('data-theme', settings.theme);
+            n++;
+        }
+        return n;
+    },
+
     exportData() {
         const data = Storage.getAll();
         const custom = localStorage.getItem('autocare_custom_recs');
-        // Receipt photos live in IndexedDB, so pull them in or a restore would lose them
-        const ids = Storage.getBills('all').map(b => b.photoId).filter(Boolean);
+        // Include photos for trashed records too, so restoring one keeps its receipt
+        const ids = [...new Set(Storage.getAllReferencedBills().map(b => b.photoId).filter(Boolean))];
         Promise.all(ids.map(id => Photos.get(id).then(d => [id, d]).catch(() => [id, null])))
             .then(pairs => {
                 const photos = {};
-                pairs.forEach(([id, d]) => { if (d) photos[id] = d; });
-                const payload = { ...data, customRecs: custom ? JSON.parse(custom) : {}, photos };
-                const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+                let missing = 0;
+                pairs.forEach(([id, d]) => { if (d) photos[id] = d; else missing++; });
+                const payload = {
+                    formatVersion: 2,
+                    exportedAt: new Date().toISOString(),
+                    ...data,
+                    customRecs: custom ? JSON.parse(custom) : {},
+                    settings: this.collectSettings(),
+                    photos
+                };
+                const json = JSON.stringify(payload, null, 2);
+                const blob = new Blob([json], { type: 'application/json' });
                 const url = URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
@@ -24,6 +60,17 @@ const Features = {
                 URL.revokeObjectURL(url);
                 Storage.markBackedUp();
                 if (App.currentPage === 'dashboard') App.renderPage('dashboard');
+
+                const n = Object.keys(photos).length;
+                const mb = (json.length / 1048576).toFixed(1);
+                alert(
+                    'Backup saved (' + mb + ' MB)\n\n' +
+                    data.cars.length + ' car(s)\n' +
+                    data.services.length + ' service record(s)\n' +
+                    n + ' receipt photo(s)' + (missing ? ' (' + missing + ' could not be read)' : '') + '\n' +
+                    'Settings and custom intervals included\n\n' +
+                    'Keep this file in Files or iCloud Drive.'
+                );
             })
             .catch(() => alert('Could not build the backup file.'));
     },
@@ -31,40 +78,49 @@ const Features = {
     importData(file) {
         const reader = new FileReader();
         reader.onload = (e) => {
-            try {
-                const data = JSON.parse(e.target.result);
-                if (data.cars && data.services && data.reminders) {
-                    const existing = Storage.getAll();
-                    const merge = confirm('Merge with existing data? (Cancel = Replace all)');
-                    if (merge) {
-                        const ids = new Set(existing.cars.map(c => c.id));
-                        data.cars.forEach(c => { if (!ids.has(c.id)) existing.cars.push(c); });
-                        const sids = new Set(existing.services.map(s => s.id));
-                        data.services.forEach(s => { if (!sids.has(s.id)) existing.services.push(s); });
-                        const rids = new Set(existing.reminders.map(r => r.id));
-                        data.reminders.forEach(r => { if (!rids.has(r.id)) existing.reminders.push(r); });
-                        if (data.fuelLogs) {
-                            const fids = new Set((existing.fuelLogs || []).map(f => f.id));
-                            data.fuelLogs.forEach(f => { if (!fids.has(f.id)) existing.fuelLogs.push(f); });
-                        }
-                        if (data.odometerLogs) {
-                            if (!existing.odometerLogs) existing.odometerLogs = [];
-                            const oids = new Set(existing.odometerLogs.map(o => o.id));
-                            data.odometerLogs.forEach(o => { if (!oids.has(o.id)) existing.odometerLogs.push(o); });
-                        }
-                        Storage.save(existing);
-                    } else {
-                        Storage.save({ cars: data.cars, services: data.services, reminders: data.reminders, fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [], trash: data.trash || [] });
-                    }
-                    if (data.customRecs) localStorage.setItem('autocare_custom_recs', JSON.stringify(data.customRecs));
-                    if (data.photos) {
-                        Object.entries(data.photos).forEach(([id, d]) => { if (d) Photos.put(id, d).catch(() => {}); });
-                    }
-                    alert('Data imported successfully!');
+            let data;
+            try { data = JSON.parse(e.target.result); }
+            catch (err) { return alert('That file is not readable: ' + err.message); }
+            if (!data || !data.cars || !data.services || !data.reminders) return alert('That does not look like an AutoCare backup.');
+
+            const merge = confirm('Merge with existing data? (Cancel = Replace all)');
+            const existing = Storage.getAll();
+            if (merge) {
+                const mergeBy = (key) => {
+                    if (!Array.isArray(data[key])) return;
+                    if (!Array.isArray(existing[key])) existing[key] = [];
+                    const seen = new Set(existing[key].map(x => x.id));
+                    data[key].forEach(x => { if (!seen.has(x.id)) existing[key].push(x); });
+                };
+                ['cars', 'services', 'reminders', 'fuelLogs', 'odometerLogs', 'trash'].forEach(mergeBy);
+                Storage.save(existing);
+            } else {
+                Storage.save({
+                    cars: data.cars, services: data.services, reminders: data.reminders,
+                    fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [], trash: data.trash || []
+                });
+            }
+            if (data.customRecs) localStorage.setItem('autocare_custom_recs', JSON.stringify(data.customRecs));
+            const settingsRestored = this.applySettings(data.settings);
+
+            // Wait for the images to actually land before reporting success
+            const entries = Object.entries(data.photos || {});
+            Promise.all(entries.map(([id, d]) => d ? Photos.put(id, d).then(() => true).catch(() => false) : Promise.resolve(false)))
+                .then(results => {
+                    const ok = results.filter(Boolean).length;
+                    const failed = results.length - ok;
                     App.renderPage(App.currentPage);
-                } else { alert('Invalid backup file.'); }
-            } catch (err) { alert('Error reading file: ' + err.message); }
+                    alert(
+                        'Import complete\n\n' +
+                        Storage.getCars().length + ' car(s)\n' +
+                        Storage.getServices('all').length + ' service record(s)\n' +
+                        ok + ' receipt photo(s) restored' + (failed ? ' (' + failed + ' failed)' : '') + '\n' +
+                        (settingsRestored ? 'Settings restored' : 'No settings in this file — check climate mode in Settings')
+                    );
+                })
+                .catch(() => { App.renderPage(App.currentPage); alert('Records imported, but some receipt photos could not be restored.'); });
         };
+        reader.onerror = () => alert('Could not read that file.');
         reader.readAsText(file);
     },
 
