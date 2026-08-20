@@ -8,14 +8,15 @@ const Features = {
     // Everything that makes the app behave as configured must ride along: the
     // records, custom intervals, the settings that change how intervals are
     // calculated, and every receipt image (which lives in IndexedDB, not here).
-    SETTING_KEYS: { climate: 'autocare_climate', mechanics: 'autocare_mechanics', theme: 'autocare_theme' },
+    SETTING_KEYS: { climate: 'autocare_climate', mechanics: 'autocare_mechanics', theme: 'autocare_theme', lang: 'autocare_lang' },
 
     collectSettings() {
         const raw = k => localStorage.getItem(k);
         return {
             climate: raw(this.SETTING_KEYS.climate) || 'normal',
             mechanics: JSON.parse(raw(this.SETTING_KEYS.mechanics) || '[]'),
-            theme: raw(this.SETTING_KEYS.theme) || 'light'
+            theme: raw(this.SETTING_KEYS.theme) || 'light',
+            lang: raw(this.SETTING_KEYS.lang) || 'en'
         };
     },
 
@@ -29,6 +30,11 @@ const Features = {
             document.documentElement.setAttribute('data-theme', settings.theme);
             n++;
         }
+        if (settings.lang && typeof I18N !== 'undefined') {
+            I18N.set(settings.lang);
+            I18N.translateDOM();
+            n++;
+        }
         return n;
     },
 
@@ -36,7 +42,7 @@ const Features = {
         const data = Storage.getAll();
         const custom = localStorage.getItem('autocare_custom_recs');
         // Include photos for trashed records too, so restoring one keeps its receipt
-        const ids = [...new Set(Storage.getAllReferencedBills().map(b => b.photoId).filter(Boolean))];
+        const ids = [...new Set(Storage.getAllReferencedBills().flatMap(b => Photos.idsFor(b)))];
         Promise.all(ids.map(id => Photos.get(id).then(d => [id, d]).catch(() => [id, null])))
             .then(pairs => {
                 const photos = {};
@@ -130,17 +136,18 @@ const Features = {
     // Small indicator in the services table
     billsCell(service) {
         const bills = service.bills || [];
-        if (!bills.length) return '<span class="bill-none">No bill</span>';
-        const withPhoto = bills.filter(b => b.photoId).length;
+        if (!bills.length) return '<span class="bill-none">' + t('No bill') + '</span>';
+        const withPhoto = bills.reduce((n, b) => n + Photos.idsFor(b).length, 0);
         return `<span class="bill-count">${bills.length}</span>${withPhoto ? `<span class="bill-cam" title="${withPhoto} receipt photo(s)">&#128247;</span>` : ''}`;
     },
 
     _billRowHTML(b) {
         b = b || {};
         const rid = 'br_' + Math.random().toString(36).slice(2, 8);
-        return `<div class="bill-row" data-photo="${b.photoId || ''}">
+        const pids = Photos.idsFor(b);
+        return `<div class="bill-row" data-photos="${pids.join(',')}">
             <div class="bill-line bill-line-1">
-                <select class="bill-kind">${this.BILL_KINDS.map(k => `<option value="${k}" ${b.kind === k ? 'selected' : ''}>${k}</option>`).join('')}</select>
+                <select class="bill-kind">${this.BILL_KINDS.map(k => `<option value="${k}" ${b.kind === k ? 'selected' : ''}>${I18N.t(k)}</option>`).join('')}</select>
                 <input type="text" class="bill-label" placeholder="What is it for? e.g. Spark plugs" value="${(b.label || '').replace(/"/g, '&quot;')}">
                 <input type="number" class="bill-amount" placeholder="0" step="0.01" value="${b.amount || ''}" oninput="Features.recalcBillTotal()">
                 <button type="button" class="bill-del" title="Remove this bill" onclick="Features.removeBillRow(this)">&times;</button>
@@ -151,10 +158,10 @@ const Features = {
                 <input type="number" class="bill-wkm" placeholder="Warranty km" value="${b.warrantyKm || ''}">
             </div>
             <div class="bill-line bill-line-3">
-                <input type="file" id="${rid}" accept="image/*" style="display:none" onchange="Features.pickBillPhoto(this)">
-                <button type="button" class="bill-photo-btn" onclick="document.getElementById('${rid}').click()">${b.photoId ? 'Replace receipt' : 'Attach receipt'}</button>
-                <span class="bill-photo-state">${b.photoId ? '<span class="bill-photo-ok">Receipt attached</span>' : ''}</span>
-                ${b.photoId ? `<button type="button" class="bill-photo-view" onclick="Photos.view('${b.photoId}')">View</button>` : ''}
+                <input type="file" id="${rid}" accept="image/*" multiple style="display:none" onchange="Features.pickBillPhoto(this)">
+                <button type="button" class="bill-photo-btn" onclick="document.getElementById('${rid}').click()">${t('Attach receipt')}</button>
+                <span class="bill-photo-state">${pids.length ? `<span class="bill-photo-ok">${pids.length} ${t(pids.length === 1 ? 'page' : 'pages')}</span>` : ''}</span>
+                ${pids.length ? `<button type="button" class="bill-photo-view" onclick="Photos.view(['${pids.join("','")}'])">${t('View')}</button>` : ''}
             </div>
         </div>`;
     },
@@ -163,8 +170,8 @@ const Features = {
         const rows = (bills || []).map(b => this._billRowHTML(b)).join('');
         return `<div class="bills-block">
             <div class="bills-head">
-                <span class="bills-title">Bills &amp; Receipts</span>
-                <button type="button" class="btn btn-secondary btn-sm" onclick="Features.addBillRow()">+ Add Bill</button>
+                <span class="bills-title">${t("Bills & Receipts")}</span>
+                <button type="button" class="btn btn-secondary btn-sm" onclick="Features.addBillRow()">${t("+ Add Bill")}</button>
             </div>
             <p class="bills-hint">Add one row per bill — parts from one shop, labour from another. Leave this empty and just type the cost below if you have no bill.</p>
             <div id="bills-list">${rows}</div>
@@ -181,34 +188,39 @@ const Features = {
 
     removeBillRow(btn) {
         const row = btn.closest('.bill-row');
-        const pid = row.getAttribute('data-photo');
-        if (pid) Photos.remove(pid).catch(() => {});
+        (row.getAttribute('data-photos') || '').split(',').filter(Boolean)
+            .forEach(pid => Photos.remove(pid).catch(() => {}));
         row.remove();
         this.recalcBillTotal();
     },
 
     pickBillPhoto(input) {
-        const file = input.files && input.files[0];
-        if (!file) return;
+        const files = Array.from(input.files || []);
+        if (!files.length) return;
         const row = input.closest('.bill-row');
         const state = row.querySelector('.bill-photo-state');
-        state.innerHTML = '<span class="bill-photo-working">Compressing…</span>';
-        const old = row.getAttribute('data-photo');
-        Photos.save(file).then(id => {
-            if (old) Photos.remove(old).catch(() => {});
-            row.setAttribute('data-photo', id);
-            state.innerHTML = '<span class="bill-photo-ok">Receipt attached</span>';
-            row.querySelector('.bill-photo-btn').textContent = 'Replace receipt';
-            let viewBtn = row.querySelector('.bill-photo-view');
-            if (!viewBtn) {
-                row.querySelector('.bill-line-3').insertAdjacentHTML('beforeend',
-                    `<button type="button" class="bill-photo-view" onclick="Photos.view('${id}')">View</button>`);
-            } else {
-                viewBtn.setAttribute('onclick', `Photos.view('${id}')`);
-            }
-        }).catch(err => {
-            state.innerHTML = `<span class="bill-photo-err">${err.message}</span>`;
-        });
+        state.innerHTML = '<span class="bill-photo-working">' + t('Compressing…') + '</span>';
+        Promise.all(files.map(f => Photos.save(f).then(id => id).catch(() => null)))
+            .then(ids => {
+                const good = ids.filter(Boolean);
+                const failed = ids.length - good.length;
+                const existing = (row.getAttribute('data-photos') || '').split(',').filter(Boolean);
+                const all = existing.concat(good);
+                row.setAttribute('data-photos', all.join(','));
+                state.innerHTML = all.length
+                    ? '<span class="bill-photo-ok">' + all.length + ' ' + t(all.length === 1 ? 'page' : 'pages') + '</span>' +
+                      (failed ? ' <span class="bill-photo-err">' + failed + ' ' + t('failed') + '</span>' : '')
+                    : '<span class="bill-photo-err">' + t('Could not read those images') + '</span>';
+                let viewBtn = row.querySelector('.bill-photo-view');
+                const call = "Photos.view(['" + all.join("','") + "'])";
+                if (all.length && !viewBtn) {
+                    row.querySelector('.bill-line-3').insertAdjacentHTML('beforeend',
+                        '<button type="button" class="bill-photo-view" onclick="' + call + '">' + t('View') + '</button>');
+                } else if (viewBtn) {
+                    viewBtn.setAttribute('onclick', call);
+                }
+            })
+            .catch(err => { state.innerHTML = '<span class="bill-photo-err">' + err.message + '</span>'; });
         input.value = '';
     },
 
@@ -227,13 +239,13 @@ const Features = {
             const vendor = row.querySelector('.bill-vendor').value.trim();
             const wm = row.querySelector('.bill-wmonths').value;
             const wk = row.querySelector('.bill-wkm').value;
-            const photoId = row.getAttribute('data-photo') || '';
+            const photoIds = (row.getAttribute('data-photos') || '').split(',').filter(Boolean);
             // keep a row only if it carries something meaningful
-            if (!amount && !label && !vendor && !photoId) return;
+            if (!amount && !label && !vendor && !photoIds.length) return;
             out.push({
                 id: 'bl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
                 kind: row.querySelector('.bill-kind').value,
-                label, vendor, photoId,
+                label, vendor, photoIds,
                 amount: amount || '0',
                 warrantyMonths: wm || '',
                 warrantyKm: wk || '',
@@ -268,7 +280,7 @@ const Features = {
     cleanupPhotos() {
         if (typeof Photos === 'undefined') return;
         Photos.keys().then(keys => {
-            const used = new Set(Storage.getAllReferencedBills().map(b => b.photoId).filter(Boolean));
+            const used = new Set(Storage.getAllReferencedBills().flatMap(b => Photos.idsFor(b)));
             keys.forEach(k => { if (!used.has(k)) Photos.remove(k).catch(() => {}); });
         }).catch(() => {});
     },
@@ -282,7 +294,7 @@ const Features = {
         const expired = Storage.getExpiredWarranties(cid);
 
         if (!active.length && !expired.length) {
-            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M32 8l18 8v16c0 11-8 19-18 24-10-5-18-13-18-24V16l18-8z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linejoin="round"/><path d="M24 32l6 6 12-13" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div><p class="empty-state-text">No part warranties yet</p><p class="warranty-empty-hint">Add a bill to a service and give it a warranty in months or km — it will appear here.</p></div>`;
+            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M32 8l18 8v16c0 11-8 19-18 24-10-5-18-13-18-24V16l18-8z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linejoin="round"/><path d="M24 32l6 6 12-13" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div><p class="empty-state-text">${t("No part warranties yet")}</p><p class="warranty-empty-hint">Add a bill to a service and give it a warranty in months or km — it will appear here.</p></div>`;
             return;
         }
 
@@ -297,22 +309,22 @@ const Features = {
             return `<div class="warranty-card wc-${cls}">
                 <div class="wc-head">
                     <div>
-                        <div class="wc-title">${bill.label || bill.kind}</div>
-                        <div class="wc-sub">${car ? car.make + ' ' + car.model : ''} &middot; ${bill.serviceType}</div>
+                        <div class="wc-title">${bill.label || I18N.t(bill.kind)}</div>
+                        <div class="wc-sub">${car ? car.make + ' ' + car.model : ''} &middot; ${I18N.t(bill.serviceType)}</div>
                     </div>
                     <span class="badge badge-${cls}">${label}</span>
                 </div>
                 <div class="wc-remaining">${warranty.detail}</div>
                 <div class="wc-meta">
-                    <div class="wc-meta-row"><span>Shop</span><span>${bill.vendor || '—'}</span></div>
-                    <div class="wc-meta-row"><span>Paid</span><span>${(parseFloat(bill.amount) || 0).toFixed(0)} SAR on ${bill.date || bill.serviceDate || '—'}</span></div>
-                    <div class="wc-meta-row"><span>Cover</span><span>${terms.join(' or ') || '—'}</span></div>
-                    ${warranty.expiryDate ? `<div class="wc-meta-row"><span>Until</span><span>${warranty.expiryDate}</span></div>` : ''}
-                    ${warranty.endKm ? `<div class="wc-meta-row"><span>Or at</span><span>${warranty.endKm.toLocaleString()} km</span></div>` : ''}
+                    <div class="wc-meta-row"><span>${t("Shop")}</span><span>${bill.vendor || '—'}</span></div>
+                    <div class="wc-meta-row"><span>${t("Paid")}</span><span>${(parseFloat(bill.amount) || 0).toFixed(0)} SAR on ${bill.date || bill.serviceDate || '—'}</span></div>
+                    <div class="wc-meta-row"><span>${t("Cover")}</span><span>${terms.join(' or ') || '—'}</span></div>
+                    ${warranty.expiryDate ? `<div class="wc-meta-row"><span>${t("Until")}</span><span>${warranty.expiryDate}</span></div>` : ''}
+                    ${warranty.endKm ? `<div class="wc-meta-row"><span>${t("Or at")}</span><span>${warranty.endKm.toLocaleString()} km</span></div>` : ''}
                 </div>
                 <div class="wc-actions">
-                    ${bill.photoId ? `<button class="btn btn-secondary btn-sm" onclick="Photos.view('${bill.photoId}')">View receipt</button>` : ''}
-                    <button class="btn btn-secondary btn-sm" onclick="App.navigate('services');App.openServiceModal(Storage.getServices().find(x=>x.id==='${bill.serviceId}'))">${bill.photoId ? 'Edit' : 'Add receipt / edit'}</button>
+                    ${Photos.idsFor(bill).length ? `<button class="btn btn-secondary btn-sm" onclick="Photos.view(['${Photos.idsFor(bill).join("','")}'])">${t("View receipt")}</button>` : ''}
+                    <button class="btn btn-secondary btn-sm" onclick="App.navigate('services');App.openServiceModal(Storage.getServices().find(x=>x.id==='${bill.serviceId}'))">${Photos.idsFor(bill).length ? t('Edit') : t('Add receipt / edit')}</button>
                 </div>
             </div>`;
         };
@@ -431,7 +443,7 @@ const Features = {
         const rowHTML = (i) => {
             const parts = [];
             parts.push('<div class="insight-row">');
-            parts.push('<div class="insight-top"><span class="insight-type">' + esc(i.type) + '</span>');
+            parts.push('<div class="insight-top"><span class="insight-type">' + I18N.t(i.type) + '</span>');
             if (i.verdict) parts.push('<span class="badge badge-' + badge[i.verdict] + '">' + esc(i.note) + '</span>');
             parts.push('</div>');
 
@@ -592,7 +604,7 @@ const Features = {
         if (!items.length) {
             el.innerHTML = `<div class="action-center-card all-clear">
                 <div class="ac-clear-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="var(--green)" stroke-width="2"/><path d="M8 12l3 3 5-6" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-                <div><div class="ac-clear-title">All caught up</div><div class="ac-clear-sub">No maintenance, documents, or alerts need attention right now.</div></div>
+                <div><div class="ac-clear-title">${t("All caught up")}</div><div class="ac-clear-sub">${t("No maintenance, documents, or alerts need attention right now.")}</div></div>
             </div>`;
             return;
         }
@@ -610,7 +622,7 @@ const Features = {
         const pClass = ['ac-critical', 'ac-warning', 'ac-info'];
         const shown = items.slice(0, 6);
         el.innerHTML = `<div class="action-center-card">
-            <div class="ac-header"><span class="ac-title">Action Center</span><span class="ac-count">${items.length} item${items.length > 1 ? 's' : ''}</span></div>
+            <div class="ac-header"><span class="ac-title">${t("Action Center")}</span><span class="ac-count">${items.length} item${items.length > 1 ? 's' : ''}</span></div>
             <div class="ac-list">${shown.map(it => `
                 <div class="ac-item ${pClass[it.priority]}">
                     <span class="ac-icon"><svg viewBox="0 0 24 24" width="18" height="18">${icons[it.icon]}</svg></span>
@@ -784,13 +796,13 @@ const Features = {
         const cars = Storage.getCars();
         if (!cars.length) { el.innerHTML = ''; return; }
         el.innerHTML = `<div class="quick-bar">
-            <button class="quick-btn quick-btn-primary" onclick="Features.openOdometerModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/></svg> Update km</button>
-            <button class="quick-btn" onclick="App.openFuelModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/><path d="M13 10h2a2 2 0 012 2v3a2 2 0 002 2v0a2 2 0 002-2V8l-3-3" stroke="currentColor" stroke-width="2" fill="none"/></svg> Quick Fuel</button>
-            <button class="quick-btn" onclick="App.openRepeatPicker()" title="Log a job you've done before"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 12a9 9 0 0115-6.7L21 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 01-15 6.7L3 16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M3 21v-5h5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> Repeat</button>
-            <button class="quick-btn" onclick="App.openServiceModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg> Quick Service</button>
-            <button class="quick-btn" onclick="App.openReminderModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none"/></svg> Add Reminder</button>
-            <button class="quick-btn" onclick="Features.exportData()" title="Save a backup file"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M8 3v6h7V3M8 21v-6h8v6" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg> Back Up</button>
-            <button class="quick-btn" onclick="Features.showSettingsModal()"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> Settings</button>
+            <button class="quick-btn quick-btn-primary" onclick="Features.openOdometerModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/></svg> ${t("Update km")}</button>
+            <button class="quick-btn" onclick="App.openFuelModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/><path d="M13 10h2a2 2 0 012 2v3a2 2 0 002 2v0a2 2 0 002-2V8l-3-3" stroke="currentColor" stroke-width="2" fill="none"/></svg> ${t("Quick Fuel")}</button>
+            <button class="quick-btn" onclick="App.openRepeatPicker()" title="Log a job you've done before"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 12a9 9 0 0115-6.7L21 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 01-15 6.7L3 16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M3 21v-5h5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> ${t("Repeat")}</button>
+            <button class="quick-btn" onclick="App.openServiceModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg> ${t("Quick Service")}</button>
+            <button class="quick-btn" onclick="App.openReminderModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none"/></svg> ${t("Add Reminder")}</button>
+            <button class="quick-btn" onclick="Features.exportData()" title="Save a backup file"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M8 3v6h7V3M8 21v-6h8v6" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/></svg> ${t("Back Up")}</button>
+            <button class="quick-btn" onclick="Features.showSettingsModal()"><svg viewBox="0 0 24 24" width="18" height="18"><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="2" fill="none"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg> ${t("Settings")}</button>
         </div>`;
     },
 
@@ -799,7 +811,14 @@ const Features = {
         const climate = localStorage.getItem('autocare_climate') || 'normal';
         const html = `
             <div class="form-group">
-                <label>Driving Climate</label>
+                <label>${t("Language")}</label>
+                <select id="f-lang">
+                    <option value="en" ${I18N.lang === 'en' ? 'selected' : ''}>English</option>
+                    <option value="ar" ${I18N.lang === 'ar' ? 'selected' : ''}>العربية</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>${t("Driving Climate")}</label>
                 <select id="f-climate">
                     <option value="normal" ${climate === 'normal' ? 'selected' : ''}>Normal</option>
                     <option value="severe" ${climate === 'severe' ? 'selected' : ''}>Severe (Hot climate / Saudi Arabia)</option>
@@ -807,31 +826,31 @@ const Features = {
                 <small style="color:var(--text3);display:block;margin-top:4px">Severe climate reduces recommended intervals by 20% (heat accelerates wear)</small>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
-                <label>Backup</label>
+                <label>${t("Backup")}</label>
                 <div class="backup-status">${Features.backupStatusLine()}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
-                    <button class="btn btn-primary btn-sm" onclick="Features.exportData()">Export Backup</button>
-                    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-file').click()">Import Backup</button>
+                    <button class="btn btn-primary btn-sm" onclick="Features.exportData()">${t("Export Backup")}</button>
+                    <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-file').click()">${t("Import Backup")}</button>
                     <input type="file" id="import-file" accept=".json" style="display:none" onchange="Features.importData(this.files[0])">
                 </div>
                 <small class="field-note">Everything is stored in this browser only. Save the file to Files or iCloud Drive so a lost phone doesn't take your records with it.</small>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
-                <label>Recently Deleted</label>
+                <label>${t("Recently Deleted")}</label>
                 <div id="trash-list">${Features.renderTrash()}</div>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
-                <label>Receipt Storage</label>
+                <label>${t("Receipt Storage")}</label>
                 <div id="storage-usage" class="backup-status">Checking…</div>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
-                <label>Notifications</label>
+                <label>${t("Notifications")}</label>
                 <button class="btn btn-secondary btn-sm" id="btn-notif" onclick="Features.requestNotifications()">Enable Browser Notifications</button>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>Mechanics & Shops</label>
                 <div id="mechanics-list" style="margin-bottom:8px">${Features.renderMechanicsList()}</div>
-                <button class="btn btn-secondary btn-sm" onclick="Features.addMechanicRow()">+ Add Mechanic</button>
+                <button class="btn btn-secondary btn-sm" onclick="Features.addMechanicRow()">${t("+ Add Mechanic")}</button>
             </div>`;
         setTimeout(() => {
             const el = document.getElementById('storage-usage');
@@ -846,6 +865,8 @@ const Features = {
         App.openModal('Settings', html, () => {
             const cl = document.getElementById('f-climate').value;
             localStorage.setItem('autocare_climate', cl);
+            const langEl = document.getElementById('f-lang');
+            if (langEl && langEl.value !== I18N.lang) { I18N.set(langEl.value); I18N.translateDOM(); }
             Features.saveMechanics();
             App.closeModal();
             App.renderPage(App.currentPage);
@@ -884,7 +905,7 @@ const Features = {
                     <div class="trash-title">${label[t.kind] || t.kind}: ${describe(t)}</div>
                     <div class="trash-sub">Deleted ${new Date(t.deletedAt).toISOString().split('T')[0]} · removed for good in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</div>
                 </div>
-                <button class="btn btn-secondary btn-sm" onclick="Features.restoreTrash('${t.id}')">Restore</button>
+                <button class="btn btn-secondary btn-sm" onclick="Features.restoreTrash('${t.id}')">${I18N.t("Restore")}</button>
             </div>`;
         }).join('');
     },
@@ -978,8 +999,8 @@ const Features = {
         const html = `
             <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Tire information for <strong>${car.make} ${car.model}</strong></p>
             <div class="form-row">
-                <div class="form-group"><label>Tire Brand</label><input type="text" id="f-tire-brand" placeholder="e.g. Michelin" value="${tires.brand}"></div>
-                <div class="form-group"><label>Tire Size</label><input type="text" id="f-tire-size" placeholder="e.g. 215/55R17" value="${tires.size}"></div>
+                <div class="form-group"><label>${t("Tire Brand")}</label><input type="text" id="f-tire-brand" placeholder="e.g. Michelin" value="${tires.brand}"></div>
+                <div class="form-group"><label>${t("Tire Size")}</label><input type="text" id="f-tire-size" placeholder="e.g. 215/55R17" value="${tires.size}"></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Installed Date</label><input type="date" id="f-tire-date" value="${tires.installedDate}"></div>

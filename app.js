@@ -3,6 +3,7 @@ const App = {
     selectedCarId: 'all',
 
     init() {
+        if (typeof I18N !== 'undefined') { I18N.init(); I18N.translateDOM(); }
         this.bindNavigation();
         this.bindModal();
         this.bindCarSelector();
@@ -37,14 +38,14 @@ const App = {
         document.getElementById(`page-${page}`).classList.add('active');
 
         const titles = { dashboard:'Dashboard', cars:'My Cars', services:'Services', fuel:'Fuel Log', expenses:'Expenses', warranty:'Warranty Center', reminders:'Reminders' };
-        document.getElementById('page-title').textContent = titles[page];
+        document.getElementById('page-title').textContent = t(titles[page]);
 
         const addBtn = document.getElementById('add-btn');
         if (page === 'dashboard' || page === 'warranty') { addBtn.style.display = 'none'; }
         else {
             addBtn.style.display = 'block';
             const labels = { cars:'+ Add Car', services:'+ Add Service', fuel:'+ Add Fuel', expenses:'+ Add Expense', reminders:'+ Add Reminder' };
-            addBtn.textContent = labels[page];
+            addBtn.textContent = t(labels[page]);
             addBtn.onclick = () => this.openAddModal(page);
         }
         this.renderPage(page);
@@ -70,7 +71,7 @@ const App = {
     updateCarSelector() {
         const sel = document.getElementById('car-selector');
         const cars = Storage.getCars();
-        sel.innerHTML = '<option value="all">All Cars</option>' + cars.map(c => `<option value="${c.id}" ${c.id===this.selectedCarId?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('');
+        sel.innerHTML = '<option value="all">' + t('All Cars') + '</option>' + cars.map(c => `<option value="${c.id}" ${c.id===this.selectedCarId?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('');
     },
 
     // ── Modal ──
@@ -81,7 +82,7 @@ const App = {
     },
     openModal(title, bodyHTML, onSave) {
         document.getElementById('modal-save').style.display = '';
-        document.getElementById('modal-title').textContent = title;
+        document.getElementById('modal-title').textContent = t(title);
         document.getElementById('modal-body').innerHTML = bodyHTML;
         document.getElementById('modal').style.display = 'flex';
         document.getElementById('modal-save').onclick = onSave;
@@ -148,8 +149,8 @@ const App = {
                 recallNotes: document.getElementById('f-recall').value.trim(),
             };
             if (!data.make || !data.model || !data.year) return alert('Please fill in make, model, and year.');
-            if (car) Storage.updateCar(car.id, data);
-            else Storage.addCar(data);
+            const saved = car ? Storage.updateCar(car.id, data) : Storage.addCar(data);
+            if (saved && saved.id) Storage.syncDocumentReminders(saved.id);
             this.closeModal(); this.renderPage(this.currentPage);
         });
     },
@@ -172,7 +173,7 @@ const App = {
             <div class="repeat-list">${recent.map(s => {
                 const since = km && s.mileage ? km - parseInt(s.mileage) : null;
                 return `<button type="button" class="repeat-row" onclick="App.repeatService('${s.id}')">
-                    <span class="repeat-type">${s.type}</span>
+                    <span class="repeat-type">${I18N.t(s.type)}</span>
                     <span class="repeat-meta">last ${s.date}${since && since > 0 ? ' · ' + since.toLocaleString() + ' km ago' : ''}${Storage.getServiceCost(s) ? ' · ' + Storage.getServiceCost(s).toFixed(0) + ' SAR' : ''}</span>
                 </button>`;
             }).join('')}</div>`;
@@ -204,7 +205,7 @@ const App = {
         const chips = types.map(t => {
             const id = 'svc-'+t.toLowerCase().replace(/\s+/g,'-');
             const preChecked = !isEdit && presetType === t;
-            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${preChecked?'checked':''} ${isEdit?'disabled':''} onchange="App._toggleServiceExtras()"><span class="service-chip-label">${t}</span></label>`;
+            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${preChecked?'checked':''} ${isEdit?'disabled':''} onchange="App._toggleServiceExtras()"><span class="service-chip-label">${I18N.t(t)}</span></label>`;
         }).join('');
         // Fall back to the car currently filtered, else the first one, so the odometer
         // can always be pre-filled instead of being typed by hand.
@@ -213,7 +214,7 @@ const App = {
         const html = `
             <div class="form-group"><label>Car</label><select id="f-car" onchange="App._syncServiceMileage()">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-group"><label>${isEdit?'Service Type':'Services Performed (select all that apply)'}</label>
-                ${isEdit?`<select id="f-type" onchange="App._toggleServiceExtras()">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${t}</option>`).join('')}</select>`:`<div class="service-chips">${chips}</div>`}
+                ${isEdit?`<select id="f-type" onchange="App._toggleServiceExtras()">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select>`:`<div class="service-chips">${chips}</div>`}
             </div>
             <div id="oil-options" style="display:${isOil||presetType==='Oil Change'?'block':'none'}">
                 <div class="form-group"><label>Oil Type (next change interval)</label>
@@ -360,7 +361,7 @@ const App = {
         const types = ['Oil Change','Tire Rotation','Brake Inspection','Air Filter','Registration Renewal','Insurance Renewal','Inspection','Other'];
         const html = `
             <div class="form-group"><label>Car</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${reminder&&reminder.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
-            <div class="form-group"><label>Reminder For</label><select id="f-type">${types.map(t=>`<option value="${t}" ${reminder&&reminder.type===t?'selected':''}>${t}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Reminder For</label><select id="f-type">${types.map(t=>`<option value="${t}" ${reminder&&reminder.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select></div>
             <div class="form-row">
                 <div class="form-group"><label>Due Date</label><input type="date" id="f-duedate" value="${reminder?reminder.dueDate:''}"></div>
                 <div class="form-group"><label>Due Mileage (km)</label><input type="number" id="f-duemileage" placeholder="Optional" value="${reminder?reminder.dueMileage||'':''}"></div>
@@ -379,7 +380,7 @@ const App = {
         if(!car)return;
         const types=Recommendations.logTypes();
         const html=`<p style="font-size:12px;color:var(--text3);margin-bottom:14px">Custom interval for <strong>${car.make} ${car.model}</strong>. Overrides manufacturer data.</p>
-            <div class="form-group"><label>Service Type</label><select id="f-rec-type">${types.map(t=>`<option value="${t}">${t}</option>`).join('')}</select></div>
+            <div class="form-group"><label>Service Type</label><select id="f-rec-type">${types.map(t=>`<option value="${t}">${I18N.t(t)}</option>`).join('')}</select></div>
             <div class="form-row"><div class="form-group"><label>Interval (km)</label><input type="number" id="f-rec-km" placeholder="15000"></div><div class="form-group"><label>Interval (months)</label><input type="number" id="f-rec-months" placeholder="12"></div></div>
             <div class="form-group"><label>Note</label><input type="text" id="f-rec-note" placeholder="Per dealer recommendation"></div>`;
         this.openModal('Custom Maintenance Schedule',html,()=>{
@@ -445,17 +446,17 @@ const App = {
         // Recent services
         const recentEl=document.getElementById('recent-services');
         const recent=services.sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
-        recentEl.innerHTML=recent.length?recent.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${s.type}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:'?'} &middot; ${s.date}</small></div><div style="font-weight:600;font-size:13px">${Storage.getServiceCost(s).toFixed(0)} SAR</div></div>`;}).join(''):'<p class="empty-state">No services yet</p>';
+        recentEl.innerHTML=recent.length?recent.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(s.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:'?'} &middot; ${s.date}</small></div><div style="font-weight:600;font-size:13px">${Storage.getServiceCost(s).toFixed(0)} SAR</div></div>`;}).join(''):'<p class="empty-state">${t("No services yet")}</p>';
 
         // Upcoming reminders
         const remEl=document.getElementById('upcoming-reminders');
-        remEl.innerHTML=reminders.slice(0,5).length?reminders.slice(0,5).map(r=>{const car=cars.find(c=>c.id===r.carId);const days=Math.ceil((new Date(r.dueDate)-new Date())/86400000);let badge='badge-blue';if(days<0)badge='badge-red';else if(days<=7)badge='badge-orange';const label=days<0?Math.abs(days)+'d overdue':days===0?'Today':'In '+days+'d';return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${r.type}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:''}</small></div><span class="badge ${badge}">${label}</span></div>`;}).join(''):'<p class="empty-state">No upcoming reminders</p>';
+        remEl.innerHTML=reminders.slice(0,5).length?reminders.slice(0,5).map(r=>{const car=cars.find(c=>c.id===r.carId);const days=Math.ceil((new Date(r.dueDate)-new Date())/86400000);let badge='badge-blue';if(days<0)badge='badge-red';else if(days<=7)badge='badge-orange';const label=days<0?Math.abs(days)+'d overdue':days===0?'Today':'In '+days+'d';return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(r.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:''}</small></div><span class="badge ${badge}">${label}</span></div>`;}).join(''):'<p class="empty-state">${t("No upcoming reminders")}</p>';
     },
 
     // ── Render: Cars ──
     renderCars() {
         const cars=Storage.getCars(), el=document.getElementById('cars-list');
-        if(!cars.length){ el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="8" y="24" width="48" height="20" rx="6" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M16 24l4-10h24l4 10" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="20" cy="44" r="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><circle cx="44" cy="44" r="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><rect x="22" y="18" width="20" height="8" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">No cars added yet</p><button class="btn btn-primary" onclick="App.openCarModal()">+ Add Your First Car</button></div>`; return; }
+        if(!cars.length){ el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="8" y="24" width="48" height="20" rx="6" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M16 24l4-10h24l4 10" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="20" cy="44" r="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><circle cx="44" cy="44" r="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><rect x="22" y="18" width="20" height="8" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">${t("No cars added yet")}</p><button class="btn btn-primary" onclick="App.openCarModal()">${t("+ Add Your First Car")}</button></div>`; return; }
         el.innerHTML=cars.map(c=>{
             const sc=Storage.getServices(c.id).length, tc=Storage.getTotalExpenses(c.id), h=Storage.getCarHealthScore(c);
             const recs=Recommendations.getAllForCar(c), hasRecs=Object.keys(recs).length>0;
@@ -463,13 +464,13 @@ const App = {
             const fresh=Storage.getOdometerFreshness(c);
             let recsHTML='';
             if(hasRecs){
-                recsHTML=`<div class="car-recs"><div class="car-recs-title">Maintenance Schedule</div>${Object.keys(recs).map(type=>{
+                recsHTML=`<div class="car-recs"><div class="car-recs-title">${t("Maintenance Schedule")}</div>${Object.keys(recs).map(type=>{
                     const st=Recommendations.getMaintenanceStatus(c,type);
                     if(!st) return '';
                     const sClass=st.status==='overdue'?'red':st.status==='soon'?'orange':'green';
                     const sLabel=st.status==='overdue'?'Overdue':st.status==='soon'?'Soon':'OK';
                     return `<div class="rec-row2">
-                        <div class="rec-top"><span class="rec-type">${type}</span><span class="badge badge-${sClass}">${sLabel}</span></div>
+                        <div class="rec-top"><span class="rec-type">${I18N.t(type)}</span><span class="badge badge-${sClass}">${sLabel}</span></div>
                         <div class="rec-progress"><div class="rec-progress-bar ${sClass}" style="width:${Math.min(100,st.usedPct)}%"></div></div>
                         <div class="rec-meta"><span class="rec-detail">Every ${st.rec.km.toLocaleString()} km / ${st.rec.months||12} mo</span><span class="rec-next">${st.detail}</span></div>
                     </div>`;
@@ -483,13 +484,13 @@ const App = {
             if(c.registrationExpiry){const d=Math.ceil((new Date(c.registrationExpiry)-new Date())/86400000);docs.push({label:'Registration',date:c.registrationExpiry,days:d});}
             if(c.warrantyExpiry){const d=Math.ceil((new Date(c.warrantyExpiry)-new Date())/86400000);docs.push({label:'Warranty',date:c.warrantyExpiry,days:d,warranty:true});}
             if(docs.length){
-                docsHTML=`<div class="car-recs"><div class="car-recs-title">Documents</div>${docs.map(doc=>{
+                docsHTML=`<div class="car-recs"><div class="car-recs-title">${t("Documents")}</div>${docs.map(doc=>{
                     let sb='';
                     if(doc.warranty){sb=doc.days<0?'<span class="badge badge-red">Expired</span>':'<span class="badge badge-blue">Active</span>';}
                     else if(doc.days<0)sb='<span class="badge badge-red">Expired</span>';
                     else if(doc.days<=30)sb=`<span class="badge badge-orange">${doc.days}d left</span>`;
                     else sb='<span class="badge badge-green">Valid</span>';
-                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${doc.label}</span><span class="rec-detail">${doc.warranty?'Until':'Expires'} ${doc.date}</span></div><div class="rec-status">${sb}</div></div>`;
+                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${I18N.t(doc.label)}</span><span class="rec-detail">${doc.warranty?'Until':'Expires'} ${doc.date}</span></div><div class="rec-status">${sb}</div></div>`;
                 }).join('')}</div>`;
             }
             // Keep-or-sell: maintenance spend over the last year against the car's value
@@ -498,11 +499,11 @@ const App = {
             if(own && (own.maint12>0 || own.hasValue)){
                 const vClass=own.verdict==='consider'?'red':own.verdict==='watch'?'orange':'green';
                 ownHTML=`<div class="own-block own-${own.verdict||'none'}">
-                    <div class="own-head"><span class="own-title">Running Cost (last 12 months)</span>${own.headline?`<span class="badge badge-${vClass}">${own.headline}</span>`:''}</div>
+                    <div class="own-head"><span class="own-title">${t("Running Cost (last 12 months)")}</span>${own.headline?`<span class="badge badge-${vClass}">${own.headline}</span>`:''}</div>
                     <div class="own-stats">
-                        <div class="own-stat"><span class="own-val">${own.maint12.toFixed(0)}</span><span class="own-lab">SAR maintenance</span></div>
-                        <div class="own-stat"><span class="own-val">${own.km12?own.km12.toLocaleString():'—'}</span><span class="own-lab">km per year</span></div>
-                        <div class="own-stat"><span class="own-val">${own.maintPerKm!==null?own.maintPerKm.toFixed(2):'—'}</span><span class="own-lab">SAR/km upkeep</span></div>
+                        <div class="own-stat"><span class="own-val">${own.maint12.toFixed(0)}</span><span class="own-lab">${t("SAR maintenance")}</span></div>
+                        <div class="own-stat"><span class="own-val">${own.km12?own.km12.toLocaleString():'—'}</span><span class="own-lab">${t("km per year")}</span></div>
+                        <div class="own-stat"><span class="own-val">${own.maintPerKm!==null?own.maintPerKm.toFixed(2):'—'}</span><span class="own-lab">${t("SAR/km upkeep")}</span></div>
                     </div>
                     ${own.hasValue
                         ? `<div class="own-note">Maintenance is <strong>${Math.round(own.ratio*100)}%</strong> of the car's ${own.value.toLocaleString()} SAR value.${own.verdict==='consider'?' Once yearly upkeep passes about a third of what the car is worth, replacing it usually costs less than keeping it.':own.verdict==='watch'?' Worth watching — still cheaper than replacing.':' Comfortably worth keeping.'}</div>`
@@ -517,7 +518,7 @@ const App = {
             // Tire info
             let tireHTML='';
             if(c.tires&&c.tires.brand){
-                tireHTML=`<div class="tire-info"><div class="tire-info-title">Tires</div>
+                tireHTML=`<div class="tire-info"><div class="tire-info-title">${t("Tires")}</div>
                     <div class="tire-detail"><span>Brand / Size</span><span>${c.tires.brand} ${c.tires.size||''}</span></div>
                     ${c.tires.installedDate?`<div class="tire-detail"><span>Installed</span><span>${c.tires.installedDate}${c.tires.installedMileage?' at '+parseInt(c.tires.installedMileage).toLocaleString()+' km':''}</span></div>`:''}
                     ${c.tires.warrantyKm?`<div class="tire-detail"><span>Warranty</span><span>${parseInt(c.tires.warrantyKm).toLocaleString()} km</span></div>`:''}
@@ -535,18 +536,18 @@ const App = {
                     <button class="btn btn-primary btn-sm odo-block-btn" onclick="Features.openOdometerModal('${c.id}')">Update</button>
                 </div>
                 <div class="car-card-details">
-                    <div class="car-detail"><span>Plate</span><span>${c.plate||'-'}</span></div>
-                    <div class="car-detail"><span>Services</span><span>${sc}</span></div>
-                    <div class="car-detail"><span>Total Spent</span><span>${tc.toFixed(0)} SAR</span></div>
-                    ${cpk!==null?`<div class="car-detail"><span>Running Cost</span><span>${cpk.toFixed(2)} SAR/km</span></div>`:''}
+                    <div class="car-detail"><span>${t("Plate")}</span><span>${c.plate||'-'}</span></div>
+                    <div class="car-detail"><span>${t("Services")}</span><span>${sc}</span></div>
+                    <div class="car-detail"><span>${t("Total Spent")}</span><span>${tc.toFixed(0)} SAR</span></div>
+                    ${cpk!==null?`<div class="car-detail"><span>${t("Running Cost")}</span><span>${cpk.toFixed(2)} SAR/km</span></div>`:''}
                 </div>
                 ${recallHTML}${ownHTML}${docsHTML}${recsHTML}${tireHTML}
                 <div class="car-card-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="App.openCarModal(Storage.getCars().find(c=>c.id==='${c.id}'))">Edit</button>
-                    ${hasRecs?`<button class="btn btn-secondary btn-sm" onclick="App.openCustomRecModal('${c.id}')">+ Custom</button>`:''}
-                    <button class="btn btn-secondary btn-sm" onclick="Features.openTireModal('${c.id}')">Tires</button>
-                    <button class="btn btn-secondary btn-sm" onclick="Features.printServiceHistory('${c.id}')">Print History</button>
-                    <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this car and all records?')){Storage.deleteCar('${c.id}');App.renderPage(App.currentPage);}">Delete</button>
+                    <button class="btn btn-secondary btn-sm" onclick="App.openCarModal(Storage.getCars().find(c=>c.id==='${c.id}'))">${t("Edit")}</button>
+                    ${hasRecs?`<button class="btn btn-secondary btn-sm" onclick="App.openCustomRecModal('${c.id}')">${t("+ Custom")}</button>`:''}
+                    <button class="btn btn-secondary btn-sm" onclick="Features.openTireModal('${c.id}')">${t("Tires")}</button>
+                    <button class="btn btn-secondary btn-sm" onclick="Features.printServiceHistory('${c.id}')">${t("Print History")}</button>
+                    <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this car and all records?')){Storage.deleteCar('${c.id}');App.renderPage(App.currentPage);}">${t("Delete")}</button>
                 </div>
             </div>`;
         }).join('');
@@ -554,9 +555,27 @@ const App = {
 
     // ── Render: Services ──
     renderServices() {
-        const cid=this.selectedCarId,services=Storage.getServices(cid).sort((a,b)=>new Date(b.date)-new Date(a.date)),cars=Storage.getCars(),el=document.getElementById('services-list');
-        if(!services.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M38 14a2 2 0 010 2.8l3.2 3.2a2 2 0 012.8 0l6-6A10 10 0 0136 28L21.2 42.8a4.2 4.2 0 01-6-6L30 22A10 10 0 0144 8l-6 6z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M24 40l-4 4" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" opacity=".4"/></svg></div><p class="empty-state-text">No services recorded</p></div>';return;}
-        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Service</th><th>Mileage</th><th>Bills</th><th>Cost</th><th>Actions</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td data-label="Date">${s.date}</td><td data-label="Car">${car?car.year+' '+car.make+' '+car.model:'?'}</td><td data-label="Service"><span class="badge badge-green">${s.type}</span></td><td data-label="Mileage">${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td data-label="Bills">${Features.billsCell(s)}</td><td data-label="Cost"><strong>${Storage.getServiceCost(s).toFixed(0)} SAR</strong></td><td data-label="Actions" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this service record?')){Storage.deleteService('${s.id}');Features.cleanupPhotos();App.renderPage(App.currentPage);}">Delete</button></td></tr>`;}).join('')}</tbody></table>`;
+        const cid=this.selectedCarId;
+        let services=Storage.getServices(cid).sort((a,b)=>new Date(b.date)-new Date(a.date));
+        const cars=Storage.getCars(), el=document.getElementById('services-list');
+        // Free-text search across type (both languages), shop, notes and date
+        const qEl=document.getElementById('svc-search');
+        const q=qEl?qEl.value.trim().toLowerCase():'';
+        const total=services.length;
+        if(q){
+            services=services.filter(s=>{
+                const car=cars.find(c=>c.id===s.carId);
+                const hay=[s.type, I18N.t(s.type), s.date, s.notes||'', s.mileage||'',
+                    car?car.make+' '+car.model:'',
+                    ...(s.bills||[]).map(b=>[b.vendor||'',b.label||''].join(' '))
+                ].join(' ').toLowerCase();
+                return hay.includes(q);
+            });
+        }
+        const countEl=document.getElementById('svc-count');
+        if(countEl) countEl.textContent = q ? `${services.length} / ${total}` : (total? String(total) : '');
+        if(!services.length){el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M38 14a2 2 0 010 2.8l3.2 3.2a2 2 0 012.8 0l6-6A10 10 0 0136 28L21.2 42.8a4.2 4.2 0 01-6-6L30 22A10 10 0 0144 8l-6 6z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M24 40l-4 4" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" opacity=".4"/></svg></div><p class="empty-state-text">${q?t("Nothing matched your search"):t("No services recorded")}</p></div>`;return;}
+        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Service")}</th><th>${t("Mileage")}</th><th>${t("Bills")}</th><th>${t("Cost")}</th><th>${t("Actions")}</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td data-label="${t('Date')}">${s.date}</td><td data-label="${t('Car')}">${car?car.year+' '+car.make+' '+car.model:'?'}</td><td data-label="${t('Service')}"><span class="badge badge-green">${I18N.t(s.type)}</span></td><td data-label="${t('Mileage')}">${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td data-label="${t('Bills')}">${Features.billsCell(s)}</td><td data-label="${t('Cost')}"><strong>${Storage.getServiceCost(s).toFixed(0)} SAR</strong></td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this service record?')){Storage.deleteService('${s.id}');Features.cleanupPhotos();App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Fuel ──
@@ -583,8 +602,8 @@ const App = {
         } else { chartEl.style.display='none'; }
 
         const el=document.getElementById('fuel-list');
-        if(!logs.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="12" y="10" width="24" height="40" rx="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M36 24h6a4 4 0 014 4v8a4 4 0 004 4h0a4 4 0 004-4V20l-6-6" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="18" y="18" width="12" height="10" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">No fuel logs yet</p><p class="warranty-empty-hint">Logging fill-ups unlocks consumption tracking (L/100km), true cost per kilometre, and an early warning when fuel use jumps \u2014 often the first sign of low tyre pressure, a clogged filter or a failing sensor.</p></div>';return;}
-        el.innerHTML=`<table><thead><tr><th>Date</th><th>Car</th><th>Odometer</th><th>Liters</th><th>SAR/L</th><th>Total</th><th>Actions</th></tr></thead><tbody>${logs.map(f=>{const car=cars.find(c=>c.id===f.carId);return `<tr><td data-label="Date">${f.date}</td><td data-label="Car">${car?car.make+' '+car.model:'?'}</td><td data-label="Odometer">${parseInt(f.odometer).toLocaleString()} km</td><td data-label="Liters">${f.liters} L</td><td data-label="SAR/L">${f.pricePerLiter}</td><td data-label="Total"><strong>${parseFloat(f.totalCost).toFixed(0)} SAR</strong></td><td data-label="Actions" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openFuelModal(Storage.getFuelLogs().find(x=>x.id==='${f.id}'))">Edit</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this fuel log?')){Storage.deleteFuelLog('${f.id}');App.renderPage(App.currentPage);}">Delete</button></td></tr>`;}).join('')}</tbody></table>`;
+        if(!logs.length){el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="12" y="10" width="24" height="40" rx="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M36 24h6a4 4 0 014 4v8a4 4 0 004 4h0a4 4 0 004-4V20l-6-6" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="18" y="18" width="12" height="10" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">${t("No fuel logs yet")}</p><p class="warranty-empty-hint">Logging fill-ups unlocks consumption tracking (L/100km), true cost per kilometre, and an early warning when fuel use jumps \u2014 often the first sign of low tyre pressure, a clogged filter or a failing sensor.</p></div>`;return;}
+        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Odometer")}</th><th>${t("Liters")}</th><th>SAR/L</th><th>${t("Total")}</th><th>${t("Actions")}</th></tr></thead><tbody>${logs.map(f=>{const car=cars.find(c=>c.id===f.carId);return `<tr><td data-label="${t('Date')}">${f.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Odometer')}">${parseInt(f.odometer).toLocaleString()} km</td><td data-label="${t('Liters')}">${f.liters} L</td><td data-label="${t('SAR/L')}">${f.pricePerLiter}</td><td data-label="${t('Total')}"><strong>${parseFloat(f.totalCost).toFixed(0)} SAR</strong></td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openFuelModal(Storage.getFuelLogs().find(x=>x.id==='${f.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this fuel log?')){Storage.deleteFuelLog('${f.id}');App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Expenses ──
@@ -611,14 +630,14 @@ const App = {
             ...Storage.getFuelLogs(cid).map(f=>({date:f.date,carId:f.carId,desc:'Fuel ('+f.liters+' L)',cost:parseFloat(f.totalCost||0),category:'Fuel'}))
         ].sort((a,b)=>new Date(b.date)-new Date(a.date));
 
-        if(!allExpenses.length){el.innerHTML=chartHTML+'<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="20" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M32 20v24M26 24c0-2 2.7-3.5 6-3.5s6 1.5 6 3.5-2.7 3.5-6 3.5-6 1.5-6 3.5 2.7 3.5 6 3.5 6 1.5 6 3.5c0 2-2.7 3.5-6 3.5s-6-1.5-6-3.5" stroke="var(--text3)" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div><p class="empty-state-text">No expenses yet</p></div>';return;}
-        el.innerHTML=chartHTML+`<table><thead><tr><th>Date</th><th>Car</th><th>Description</th><th>Category</th><th>Cost</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td data-label="Date">${e.date}</td><td data-label="Car">${car?car.make+' '+car.model:'?'}</td><td data-label="Description">${e.desc}</td><td data-label="Category"><span class="badge ${e.category==='Fuel'?'badge-orange':'badge-green'}">${e.category}</span></td><td data-label="Cost"><strong>${e.cost.toFixed(0)} SAR</strong></td></tr>`;}).join('')}</tbody></table>`;
+        if(!allExpenses.length){el.innerHTML=chartHTML+'<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="20" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M32 20v24M26 24c0-2 2.7-3.5 6-3.5s6 1.5 6 3.5-2.7 3.5-6 3.5-6 1.5-6 3.5 2.7 3.5 6 3.5 6 1.5 6 3.5c0 2-2.7 3.5-6 3.5s-6-1.5-6-3.5" stroke="var(--text3)" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div><p class="empty-state-text">${t("No expenses yet")}</p></div>';return;}
+        el.innerHTML=chartHTML+`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Description")}</th><th>${t("Category")}</th><th>${t("Cost")}</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td data-label="${t('Date')}">${e.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Description')}">${e.desc}</td><td data-label="${t('Category')}"><span class="badge ${e.category==='Fuel'?'badge-orange':'badge-green'}">${e.category}</span></td><td data-label="${t('Cost')}"><strong>${e.cost.toFixed(0)} SAR</strong></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Reminders ──
     renderReminders() {
         const cid=this.selectedCarId, reminders=Storage.getReminders(cid).sort((a,b)=>{const ca=Storage.getCars().find(c=>c.id===a.carId),cb=Storage.getCars().find(c=>c.id===b.carId);const sa=Storage.getReminderStatus(a,ca).effDays,sb=Storage.getReminderStatus(b,cb).effDays;return (sa===null?1e9:sa)-(sb===null?1e9:sb);}), cars=Storage.getCars(), el=document.getElementById('reminders-list');
-        if(!reminders.length){el.innerHTML='<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M44 26a12 12 0 00-24 0c0 14-6 18-6 18h36s-6-4-6-18" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M35.46 48a4 4 0 01-6.92 0" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="32" cy="14" r="2" fill="var(--text3)" opacity=".4"/></svg></div><p class="empty-state-text">No reminders set</p></div>';return;}
+        if(!reminders.length){el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M44 26a12 12 0 00-24 0c0 14-6 18-6 18h36s-6-4-6-18" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M35.46 48a4 4 0 01-6.92 0" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><circle cx="32" cy="14" r="2" fill="var(--text3)" opacity=".4"/></svg></div><p class="empty-state-text">${t("No reminders set")}</p></div>`;return;}
         el.innerHTML=reminders.map(r=>{
             const car=cars.find(c=>c.id===r.carId);
             // Judge on km AND date together, so this page cannot disagree with the
@@ -627,9 +646,9 @@ const App = {
             const badgeMap={done:'green',overdue:'red',soon:'orange',ok:'blue'};
             const sc=st.status==='overdue'?'overdue':st.status==='soon'?'soon':'';
             const sl=r.completed
-                ?'<span class="badge badge-green">Done</span>'
+                ?'<span class="badge badge-green">${t("Done")}</span>'
                 :`<span class="badge badge-${badgeMap[st.status]}">${st.detail}</span>`;
-            return `<div class="reminder-card ${sc}"><div class="reminder-card-header"><span class="reminder-card-title">${r.type}</span>${sl}</div><div class="reminder-card-car">${car?car.year+' '+car.make+' '+car.model:''}</div><div class="reminder-card-date">Due: ${r.dueDate}${r.dueMileage?' or at '+parseInt(r.dueMileage).toLocaleString()+' km':''}</div>${r.notes?`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${r.notes}</div>`:''}<div class="reminder-card-actions">${!r.completed?`<button class="btn btn-primary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:true});App.renderPage(App.currentPage);">Done</button>`:`<button class="btn btn-secondary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:false});App.renderPage(App.currentPage);">Undo</button>`}<button class="btn btn-secondary btn-sm" onclick="App.openReminderModal(Storage.getReminders().find(x=>x.id==='${r.id}'))">Edit</button><button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteReminder('${r.id}');App.renderPage(App.currentPage);}">Del</button></div></div>`;
+            return `<div class="reminder-card ${sc}"><div class="reminder-card-header"><span class="reminder-card-title">${I18N.t(r.type)}</span>${sl}</div><div class="reminder-card-car">${car?car.year+' '+car.make+' '+car.model:''}</div><div class="reminder-card-date">Due: ${r.dueDate}${r.dueMileage?' or at '+parseInt(r.dueMileage).toLocaleString()+' km':''}</div>${r.notes?`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${r.notes}</div>`:''}<div class="reminder-card-actions">${!r.completed?`<button class="btn btn-primary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:true});App.renderPage(App.currentPage);">${t("Done")}</button>`:`<button class="btn btn-secondary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:false});App.renderPage(App.currentPage);">${t("Undo")}</button>`}${!r.completed?`<button class="btn btn-secondary btn-sm" onclick="Storage.snoozeReminder('${r.id}',7);App.renderPage(App.currentPage);">${t("Snooze 1w")}</button>`:''}<button class="btn btn-secondary btn-sm" onclick="App.openReminderModal(Storage.getReminders().find(x=>x.id==='${r.id}'))">${t("Edit")}</button><button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteReminder('${r.id}');App.renderPage(App.currentPage);}">Del</button></div></div>`;
         }).join('');
     }
 };

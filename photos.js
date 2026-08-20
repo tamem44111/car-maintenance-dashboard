@@ -90,12 +90,36 @@ const Photos = {
         return this.compress(file).then(dataUrl => this.put(this.newId(), dataUrl));
     },
 
+    // A bill may carry several pages. Older records stored a single `photoId`,
+    // so read through both shapes and always hand back a list.
+    idsFor(bill) {
+        if (!bill) return [];
+        if (Array.isArray(bill.photoIds) && bill.photoIds.length) return bill.photoIds.filter(Boolean);
+        return bill.photoId ? [bill.photoId] : [];
+    },
+
     // Show a stored receipt inside the app.
     // iOS Safari — especially an installed PWA — blocks window.open(), which is why
     // the old popup viewer failed. This renders an in-app overlay instead.
     _current: null,
 
-    view(id) {
+    _set: [],
+    _idx: 0,
+
+    // Accepts one id, a list of ids, or a bill
+    view(idOrList, startAt) {
+        let ids;
+        if (Array.isArray(idOrList)) ids = idOrList.filter(Boolean);
+        else if (idOrList && typeof idOrList === 'object') ids = this.idsFor(idOrList);
+        else ids = idOrList ? [idOrList] : [];
+        if (!ids.length) { alert('No receipt photo attached.'); return; }
+        this._set = ids;
+        this._idx = Math.min(Math.max(0, startAt || 0), ids.length - 1);
+        this._load();
+    },
+
+    _load() {
+        const id = this._set[this._idx];
         this.get(id)
             .then(dataUrl => {
                 if (!dataUrl) { alert('That receipt photo is no longer stored.'); return; }
@@ -109,6 +133,12 @@ const Photos = {
             .catch(() => alert('Could not load that receipt photo.'));
     },
 
+    step(delta) {
+        if (this._set.length < 2) return;
+        this._idx = (this._idx + delta + this._set.length) % this._set.length;
+        this._load();
+    },
+
     _showOverlay(dataUrl) {
         let el = document.getElementById('photo-viewer');
         if (!el) {
@@ -120,7 +150,11 @@ const Photos = {
         el.innerHTML =
             '<div class="pv-bar">' +
                 '<button type="button" class="pv-btn" onclick="Photos.closeViewer()">Close</button>' +
-                '<span class="pv-hint">Press and hold the image to save it</span>' +
+                (this._set.length > 1
+                    ? '<button type="button" class="pv-btn" onclick="Photos.step(-1)">‹</button>' +
+                      '<span class="pv-hint">' + (this._idx + 1) + ' / ' + this._set.length + '</span>' +
+                      '<button type="button" class="pv-btn" onclick="Photos.step(1)">›</button>'
+                    : '<span class="pv-hint">Press and hold the image to save it</span>') +
                 '<button type="button" class="pv-btn pv-primary" onclick="Photos.saveImage()">Save</button>' +
             '</div>' +
             '<div class="pv-body"><img src="' + dataUrl + '" alt="Receipt"></div>';

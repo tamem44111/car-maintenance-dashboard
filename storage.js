@@ -648,6 +648,65 @@ const Storage = {
         };
     },
 
+    // Push a reminder out without pretending it was done. Moves the km target as
+    // well, otherwise a km-bound reminder would fire again immediately.
+    snoozeReminder(id, days) {
+        const data = this.getAll();
+        const r = data.reminders.find(x => x.id === id);
+        if (!r) return;
+        const base = r.dueDate ? new Date(r.dueDate) : new Date();
+        const from = base > new Date() ? base : new Date();
+        from.setDate(from.getDate() + days);
+        r.dueDate = from.toISOString().split('T')[0];
+        const rate = this.getDailyKmRate(r.carId);
+        if (r.dueMileage && rate) {
+            const car = data.cars.find(c => c.id === r.carId);
+            const now = car ? this.getEffectiveMileage(car) : 0;
+            const target = Math.max(parseInt(r.dueMileage) || 0, now) + Math.round(rate * days);
+            r.dueMileage = String(target);
+        }
+        r.snoozed = true;
+        this.save(data);
+    },
+
+    // Insurance / Istimara / Fahes should appear on the Reminders page too, not
+    // only as Action Center warnings, so they exist wherever you happen to look.
+    DOC_REMINDERS: [
+        { field: 'insuranceExpiry',    type: 'Insurance Renewal' },
+        { field: 'registrationExpiry', type: 'Registration Renewal' },
+        { field: 'fahesExpiry',        type: 'Inspection' }
+    ],
+
+    syncDocumentReminders(carId) {
+        const data = this.getAll();
+        const car = data.cars.find(c => c.id === carId);
+        if (!car) return;
+        let changed = false;
+        this.DOC_REMINDERS.forEach(({ field, type }) => {
+            const due = car[field];
+            const existing = data.reminders.find(r => r.carId === carId && r.type === type && r.autoDoc);
+            if (!due) {
+                if (existing && !existing.completed) {
+                    data.reminders = data.reminders.filter(r => r !== existing);
+                    changed = true;
+                }
+                return;
+            }
+            if (existing) {
+                if (existing.dueDate !== due) { existing.dueDate = due; existing.completed = false; changed = true; }
+            } else {
+                data.reminders.push({
+                    id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
+                    carId, type, dueDate: due, dueMileage: '',
+                    notes: 'Auto: from the date on your car record',
+                    completed: false, autoCreated: true, autoDoc: true
+                });
+                changed = true;
+            }
+        });
+        if (changed) this.save(data);
+    },
+
     // ── Service insights ──
     // Compares the interval you actually achieve against the recommended one, using
     // the mileage on your own records. Everything needed is already stored; this

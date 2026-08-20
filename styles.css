@@ -1812,3 +1812,88 @@ tr:hover td { background: var(--card-hover); }
     .rec-status { align-self: flex-end; }
     #add-btn { padding: 6px 12px; font-size: 11.5px; }
 }
+
+/* ══════════════════════════════════════════════════
+   RIGHT-TO-LEFT (Arabic)
+   Only the properties that are genuinely side-specific are mirrored.
+   ══════════════════════════════════════════════════ */
+[dir="rtl"] body { font-family: 'Noto Sans Arabic', 'Inter', -apple-system, BlinkMacSystemFont, sans-serif; }
+
+/* accent borders swap side */
+[dir="rtl"] .alert-red,
+[dir="rtl"] .alert-orange { border-left: 1px solid transparent; border-right: 4px solid currentColor; }
+[dir="rtl"] .alert-red { border-right-color: var(--red); }
+[dir="rtl"] .alert-orange { border-right-color: var(--orange); }
+
+[dir="rtl"] .reminder-card { border-left: 1px solid var(--border); border-right: 4px solid var(--blue); }
+[dir="rtl"] .reminder-card.overdue { border-right-color: var(--red); }
+[dir="rtl"] .reminder-card.soon { border-right-color: var(--orange); }
+
+[dir="rtl"] .warranty-card { border-left: 1px solid var(--border); border-right: 4px solid var(--border); }
+[dir="rtl"] .warranty-card.wc-green  { border-right-color: var(--green); }
+[dir="rtl"] .warranty-card.wc-orange { border-right-color: var(--orange); }
+[dir="rtl"] .warranty-card.wc-red    { border-right-color: var(--red); }
+[dir="rtl"] .warranty-card.wc-blue   { border-right-color: var(--blue); }
+
+[dir="rtl"] .own-block { border-left: 1px solid var(--border); border-right: 4px solid var(--border-strong); }
+[dir="rtl"] .own-block.own-healthy  { border-right-color: var(--green); }
+[dir="rtl"] .own-block.own-watch    { border-right-color: var(--orange); }
+[dir="rtl"] .own-block.own-consider { border-right-color: var(--red); }
+
+[dir="rtl"] .ac-item { border-left: 3px solid transparent; border-right: 3px solid transparent; }
+[dir="rtl"] .ac-item.ac-critical { border-right-color: var(--red); }
+[dir="rtl"] .ac-item.ac-warning  { border-right-color: var(--orange); }
+[dir="rtl"] .ac-item.ac-info     { border-right-color: var(--blue); }
+
+/* sidebar sits on the right */
+[dir="rtl"] .sidebar { border-right: none; border-left: 1px solid rgba(255,255,255,.04); }
+
+/* alignment flips */
+[dir="rtl"] .pie-val,
+[dir="rtl"] .compare-val,
+[dir="rtl"] .wc-meta-row span:last-child { text-align: left; }
+[dir="rtl"] .pie-val { margin-left: 0; margin-right: auto; }
+[dir="rtl"] .bill-cam { margin-left: 0; margin-right: 5px; }
+[dir="rtl"] .odo-badge { margin-left: 0; margin-right: 4px; }
+[dir="rtl"] .repeat-row { text-align: right; align-items: flex-end; }
+[dir="rtl"] .table-container td { text-align: left; }
+[dir="rtl"] .table-container td::before { text-align: right; }
+
+/* the insights bar and its "recommended" mark mirror together */
+[dir="rtl"] .insight-bar-mark { left: auto; right: 62.5%; }
+
+/* numbers and dates stay left-to-right inside Arabic text */
+[dir="rtl"] .stat-value,
+[dir="rtl"] .odo-block-value,
+[dir="rtl"] .own-val,
+[dir="rtl"] .drive-val,
+[dir="rtl"] .forecast-total,
+[dir="rtl"] .tco-val,
+[dir="rtl"] .wc-remaining,
+[dir="rtl"] input[type="date"],
+[dir="rtl"] input[type="month"],
+[dir="rtl"] input[type="number"] { direction: ltr; text-align: right; }
+[dir="rtl"] .health-score { direction: ltr; }
+
+/* mobile bottom bar keeps its order */
+@media (max-width: 480px) {
+    [dir="rtl"] .nav-links { flex-direction: row; }
+}
+
+/* ══════════════════════════════════════════════════
+   SEARCH BAR
+   ══════════════════════════════════════════════════ */
+.search-bar { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.search-bar input {
+    flex: 1;
+    padding: 11px 16px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--card);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 13.5px;
+    transition: var(--transition);
+}
+.search-bar input:focus { outline: none; border-color: var(--primary); box-shadow: 0 0 0 3px var(--primary-glow); }
+.search-count { font-size: 12px; font-weight: 600; color: var(--text3); flex-shrink: 0; min-width: 40px; text-align: center; }
