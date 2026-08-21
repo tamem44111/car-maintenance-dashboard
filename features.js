@@ -294,7 +294,7 @@ const Features = {
         const expired = Storage.getExpiredWarranties(cid);
 
         if (!active.length && !expired.length) {
-            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M32 8l18 8v16c0 11-8 19-18 24-10-5-18-13-18-24V16l18-8z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linejoin="round"/><path d="M24 32l6 6 12-13" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div><p class="empty-state-text">${t("No part warranties yet")}</p><p class="warranty-empty-hint">Add a bill to a service and give it a warranty in months or km — it will appear here.</p></div>`;
+            el.innerHTML = `<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M32 8l18 8v16c0 11-8 19-18 24-10-5-18-13-18-24V16l18-8z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linejoin="round"/><path d="M24 32l6 6 12-13" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg></div><p class="empty-state-text">${t("No part warranties yet")}</p><p class="warranty-empty-hint">${t("Add a bill to a service and give it a warranty in months or km — it will appear here.")}</p></div>`;
             return;
         }
 
@@ -424,6 +424,146 @@ const Features = {
         document.getElementById('odo-warn').innerHTML = '';
     },
 
+    // ── Documents ──
+    // Insurance, Istimara and the periodic inspection are the things people
+    // actually get fined for. They belong together, on the first screen, each
+    // one tappable — not buried in a car form or a list of service types.
+    DOCS: [
+        { key: 'insuranceExpiry',    label: 'Insurance',           icon: 'shield' },
+        { key: 'registrationExpiry', label: 'Registration',        icon: 'doc' },
+        { key: 'fahesExpiry',        label: 'Periodic Inspection', icon: 'check' }
+    ],
+
+    docStatus(car, key) {
+        const date = car[key];
+        if (!date) return { state: 'missing', label: t('Not set'), days: null };
+        const days = Math.ceil((new Date(date) - new Date()) / 86400000);
+        if (days < 0)  return { state: 'expired',  label: t('Expired'),  days, date };
+        if (days <= 30) return { state: 'soon',    label: t('{d}d left', { d: days }), days, date };
+        return { state: 'valid', label: t('Valid'), days, date };
+    },
+
+    renderDocuments(carId) {
+        const el = document.getElementById('documents-section');
+        if (!el) return;
+        const cars = Storage.getCars().filter(c => carId === 'all' || c.id === carId);
+        if (!cars.length) { el.innerHTML = ''; return; }
+
+        const icons = {
+            shield: '<path d="M12 3l7 3v6c0 4.2-3 8-7 9-4-1-7-4.8-7-9V6l7-3z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>',
+            doc: '<rect x="5" y="3" width="14" height="18" rx="2" stroke="currentColor" stroke-width="2" fill="none"/><path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>',
+            check: '<path d="M12 3l7 3v6c0 4.2-3 8-7 9-4-1-7-4.8-7-9V6l7-3z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M9 12l2 2 4-4.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/>'
+        };
+
+        el.innerHTML = cars.map(car => `<div class="docs-card">
+            <div class="docs-head">
+                <span class="docs-title">${t('Documents')}</span>
+                ${cars.length > 1 ? `<span class="docs-car">${car.make} ${car.model}</span>` : ''}
+            </div>
+            <div class="docs-list">${this.DOCS.map(d => {
+                const st = this.docStatus(car, d.key);
+                return `<button type="button" class="doc-row doc-${st.state}" onclick="Features.openDocumentModal('${car.id}','${d.key}')">
+                    <span class="doc-icon"><svg viewBox="0 0 24 24" width="20" height="20">${icons[d.icon]}</svg></span>
+                    <span class="doc-text">
+                        <span class="doc-name">${t(d.label)}</span>
+                        <span class="doc-sub">${st.date ? st.date : t('Tap to add')}</span>
+                    </span>
+                    <span class="doc-badge badge-${st.state === 'expired' ? 'red' : st.state === 'soon' ? 'orange' : st.state === 'missing' ? 'blue' : 'green'}">${st.label}</span>
+                </button>`;
+            }).join('')}</div>
+        </div>`).join('');
+    },
+
+    // One focused screen per document. The inspection carries extra fields
+    // because a certificate is evidence, not just a date.
+    openDocumentModal(carId, key) {
+        const car = Storage.getCars().find(c => c.id === carId);
+        if (!car) return;
+        const doc = this.DOCS.find(d => d.key === key);
+        const isInspection = key === 'fahesExpiry';
+        const today = new Date().toISOString().split('T')[0];
+
+        const last = isInspection
+            ? Storage.getServices(carId).filter(s => s.type === 'Periodic Inspection')
+                .sort((a, b) => new Date(b.date) - new Date(a.date))[0]
+            : null;
+
+        const html = `
+            <p class="doc-intro">${t(isInspection
+                ? 'Record the inspection you just had. A pass updates the expiry date automatically.'
+                : 'Update the expiry date shown on the document.')}</p>
+            ${isInspection ? `
+            <div class="form-row">
+                <div class="form-group"><label>${t('Date of inspection')}</label><input type="date" id="d-date" value="${today}"></div>
+                <div class="form-group"><label>${t('Result')}</label>
+                    <select id="d-result" onchange="Features._docResultChanged()">
+                        <option value="pass">${t('Passed')}</option>
+                        <option value="advisory">${t('Passed with advisories')}</option>
+                        <option value="fail">${t('Failed')}</option>
+                    </select>
+                </div>
+            </div>` : ''}
+            <div class="form-group">
+                <label>${t(isInspection ? 'Certificate valid until' : 'Expiry date')}</label>
+                <input type="date" id="d-expiry" value="${car[key] || ''}">
+                <small id="d-expiry-note" class="field-note"></small>
+            </div>
+            ${isInspection ? `
+            <div class="form-row">
+                <div class="form-group"><label>${t('Inspection centre')}</label><input type="text" id="d-centre" placeholder="${t('e.g. Fahes Al-Kharj Road')}" value="${last && last.inspectionCenter ? String(last.inspectionCenter).replace(/"/g, '&quot;') : ''}"></div>
+                <div class="form-group"><label>${t('Cost (SAR)')}</label><input type="number" id="d-cost" placeholder="0"></div>
+            </div>` : ''}`;
+
+        App.openModal(t(doc.label), html, () => {
+            const expiry = document.getElementById('d-expiry').value;
+            if (!isInspection) {
+                if (!expiry) return alert(t('Please choose the expiry date.'));
+                Storage.updateCar(carId, { [key]: expiry });
+                Storage.syncDocumentReminders(carId);
+                App.closeModal(); App.renderPage(App.currentPage);
+                return;
+            }
+            const result = document.getElementById('d-result').value;
+            const date = document.getElementById('d-date').value || today;
+            if (result !== 'fail' && !expiry) return alert(t('Please choose the certificate expiry date.'));
+            // logged as a service so it keeps cost, history and search
+            Storage.addService({
+                carId, type: 'Periodic Inspection', date,
+                cost: document.getElementById('d-cost').value || '0',
+                mileage: String(Storage.getEffectiveMileage(car) || ''),
+                notes: '', bills: [],
+                inspectionResult: result,
+                inspectionExpiry: expiry,
+                inspectionCenter: document.getElementById('d-centre').value.trim()
+            });
+            App._applyInspection(carId, { inspectionResult: result, inspectionExpiry: expiry }, date);
+            App.closeModal(); App.renderPage(App.currentPage);
+        });
+        setTimeout(() => this._docResultChanged(), 40);
+    },
+
+    // A failure grants no cover, so the expiry field is not the thing to fill in
+    _docResultChanged() {
+        const res = document.getElementById('d-result');
+        const exp = document.getElementById('d-expiry');
+        const note = document.getElementById('d-expiry-note');
+        if (!exp) return;
+        if (res && res.value === 'fail') {
+            exp.disabled = true;
+            exp.classList.add('input-locked');
+            if (note) note.textContent = t('A failed inspection gives no cover — a re-test reminder is set for 30 days.');
+        } else {
+            exp.disabled = false;
+            exp.classList.remove('input-locked');
+            if (note) note.textContent = t('Usually one year from the inspection date.');
+            if (res && !exp.value) {
+                const d = new Date(document.getElementById('d-date') ? document.getElementById('d-date').value : Date.now());
+                d.setFullYear(d.getFullYear() + 1);
+                exp.value = d.toISOString().split('T')[0];
+            }
+        }
+    },
+
     // ── Service Insights ──
     // What the records already know but never said: how the interval you actually
     // achieve compares with the recommended one, and what that habit costs a year.
@@ -432,9 +572,8 @@ const Features = {
         if (!el) return;
         const groups = Storage.getServiceInsights(carId);
         if (!groups.length) {
-            el.innerHTML = '<div class="card"><h3>Service Insights</h3>' +
-                '<p class="insight-empty">Log the same service twice, each with its mileage, ' +
-                'and this will compare the interval you actually achieve against the recommended one.</p></div>';
+            el.innerHTML = '<div class="card"><h3>' + t('Service Insights') + '</h3>' +
+                '<p class="insight-empty">' + t('Log the same service twice, each with its mileage, and this will compare the interval you actually achieve against the recommended one.') + '</p></div>';
             return;
         }
         const badge = { frequent: 'blue', onschedule: 'green', stretched: 'orange' };
@@ -444,13 +583,13 @@ const Features = {
             const parts = [];
             parts.push('<div class="insight-row">');
             parts.push('<div class="insight-top"><span class="insight-type">' + I18N.t(i.type) + '</span>');
-            if (i.verdict) parts.push('<span class="badge badge-' + badge[i.verdict] + '">' + esc(i.note) + '</span>');
+            if (i.verdict) parts.push('<span class="badge badge-' + badge[i.verdict] + '">' + t(i.note) + '</span>');
             parts.push('</div>');
 
             parts.push('<div class="insight-nums">');
-            parts.push('<span>You: <strong>' + i.avgKm.toLocaleString() + ' km</strong></span>');
-            if (i.recKm) parts.push('<span>Recommended: <strong>' + i.recKm.toLocaleString() + ' km</strong></span>');
-            if (i.avgCost) parts.push('<span>Avg cost: <strong>' + i.avgCost.toFixed(0) + ' SAR</strong></span>');
+            parts.push('<span>' + t('You') + ': <strong>' + i.avgKm.toLocaleString() + ' ' + t('km') + '</strong></span>');
+            if (i.recKm) parts.push('<span>' + t('Recommended') + ': <strong>' + i.recKm.toLocaleString() + ' ' + t('km') + '</strong></span>');
+            if (i.avgCost) parts.push('<span>' + t('Avg cost') + ': <strong>' + i.avgCost.toFixed(0) + ' ' + t('SAR') + '</strong></span>');
             parts.push('</div>');
 
             if (i.ratio !== null) {
@@ -476,7 +615,7 @@ const Features = {
         };
 
         el.innerHTML = groups.map(g =>
-            '<div class="card insight-card"><h3>Service Insights' +
+            '<div class="card insight-card"><h3>' + t('Service Insights') +
             (groups.length > 1 ? ' — ' + esc(g.carName) : '') + '</h3>' +
             '<div class="insight-list">' + g.items.map(rowHTML).join('') + '</div></div>'
         ).join('');
@@ -498,9 +637,9 @@ const Features = {
             // Odometer freshness — km-based reminders are only as good as the last reading
             const fresh = Storage.getOdometerFreshness(c);
             if (fresh.never || fresh.daysSince === null) {
-                items.push({ priority: 1, icon: 'gauge', title: t('Add an odometer reading'), sub: `${name} · ${t('needed to track km-based services')}`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
+                items.push({ priority: 1, icon: 'gauge', title: t('Add an odometer reading'), sub: `${name} · ${t('needed to track km-based services')}`, action: { label: t('Update'), fn: `Features.openOdometerModal('${c.id}')` } });
             } else if (fresh.stale) {
-                items.push({ priority: fresh.daysSince >= 60 ? 1 : 2, icon: 'gauge', title: t('Odometer not updated in {d} days', {d: fresh.daysSince}), sub: `${name} · ${t('last read {km} km on {d}', {km: fresh.lastKm.toLocaleString(), d: fresh.lastDate})}`, action: { label: 'Update', fn: `Features.openOdometerModal('${c.id}')` } });
+                items.push({ priority: fresh.daysSince >= 60 ? 1 : 2, icon: 'gauge', title: t('Odometer not updated in {d} days', {d: fresh.daysSince}), sub: `${name} · ${t('last read {km} km on {d}', {km: fresh.lastKm.toLocaleString(), d: fresh.lastDate})}`, action: { label: t('Update'), fn: `Features.openOdometerModal('${c.id}')` } });
             }
             // Maintenance schedule (whichever comes first)
             recTypes.forEach(type => {
@@ -511,20 +650,20 @@ const Features = {
                     icon: 'wrench',
                     title: st.status === 'overdue' ? t('{type} overdue', {type: I18N.t(type)}) : t('{type} due soon', {type: I18N.t(type)}),
                     sub: `${name} · ${st.detail}`,
-                    action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${type}')` }
+                    action: { label: t('Log'), fn: `App.openServiceModal(null,'${c.id}','${type}')` }
                 });
             });
             // Documents
             if (c.insuranceExpiry) {
                 const d = Math.ceil((new Date(c.insuranceExpiry) - today) / 86400000);
-                if (d < 0) items.push({ priority: 0, icon: 'shield', title: t('Insurance expired'), sub: `${name} · expired ${c.insuranceExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (d <= 30) items.push({ priority: 1, icon: 'shield', title: t('Insurance expires in {d} days', {d}), sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                if (d < 0) items.push({ priority: 0, icon: 'shield', title: t('Insurance expired'), sub: `${name} · expired ${c.insuranceExpiry}`, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (d <= 30) items.push({ priority: 1, icon: 'shield', title: t('Insurance expires in {d} days', {d}), sub: name, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
             // Fahes (periodic technical inspection)
             const fahesDays = c.fahesExpiry ? Math.ceil((new Date(c.fahesExpiry) - today) / 86400000) : null;
             if (fahesDays !== null) {
-                if (fahesDays < 0) items.push({ priority: 0, icon: 'doc', title: t('Fahes (inspection) expired'), sub: `${name} · expired ${c.fahesExpiry}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (fahesDays <= 30) items.push({ priority: 1, icon: 'doc', title: t('Fahes expires in {d} days', {d: fahesDays}), sub: name, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                if (fahesDays < 0) items.push({ priority: 0, icon: 'doc', title: t('Fahes (inspection) expired'), sub: `${name} · expired ${c.fahesExpiry}`, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (fahesDays <= 30) items.push({ priority: 1, icon: 'doc', title: t('Fahes expires in {d} days', {d: fahesDays}), sub: name, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
             if (c.registrationExpiry) {
                 const d = Math.ceil((new Date(c.registrationExpiry) - today) / 86400000);
@@ -534,8 +673,8 @@ const Features = {
                 if (fahesDays !== null && fahesDays < d) blockers.push('Fahes');
                 if (insDays !== null && insDays < d) blockers.push('insurance');
                 const chain = (d <= 60 && blockers.length) ? ` · ${t('renew {what} first', {what: blockers.map(x => t(x === 'Fahes' ? 'Fahes' : 'Insurance')).join(' + ')})}` : '';
-                if (d < 0) items.push({ priority: 0, icon: 'doc', title: t('Registration (Istimara) expired'), sub: `${name} · expired ${c.registrationExpiry}${chain}`, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: t('Registration expires in {d} days', {d}), sub: name + chain, action: { label: 'Edit', fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                if (d < 0) items.push({ priority: 0, icon: 'doc', title: t('Registration (Istimara) expired'), sub: `${name} · expired ${c.registrationExpiry}${chain}`, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: t('Registration expires in {d} days', {d}), sub: name + chain, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
             }
             // Measured brake pad wear beats any fixed interval. Front and rear wear at
             // very different rates, so report the latest reading for each separately.
@@ -548,9 +687,9 @@ const Features = {
                 const mm = parseFloat(padLog.padThickness);
                 const axle = padLog.type;
                 if (mm <= 3) {
-                    items.push({ priority: 0, icon: 'wrench', title: t('{t} at {mm} mm — replace now', {t: I18N.t(axle), mm}), sub: `${name} · ${t('measured {d}', {d: padLog.date})}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
+                    items.push({ priority: 0, icon: 'wrench', title: t('{t} at {mm} mm — replace now', {t: I18N.t(axle), mm}), sub: `${name} · ${t('measured {d}', {d: padLog.date})}`, action: { label: t('Log'), fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
                 } else if (mm <= 4.5) {
-                    items.push({ priority: 1, icon: 'wrench', title: t('{t} low ({mm} mm)', {t: I18N.t(axle), mm}), sub: `${name} · ${t('replace at 3 mm')} · ${t('measured {d}', {d: padLog.date})}`, action: { label: 'Log', fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
+                    items.push({ priority: 1, icon: 'wrench', title: t('{t} low ({mm} mm)', {t: I18N.t(axle), mm}), sub: `${name} · ${t('replace at 3 mm')} · ${t('measured {d}', {d: padLog.date})}`, action: { label: t('Log'), fn: `App.openServiceModal(null,'${c.id}','${axle}')` } });
                 }
             });
             // Warranty
@@ -569,7 +708,7 @@ const Features = {
                     icon: 'shield',
                     title: tyre.status === 'replace' ? t('Tyres are {y} years old — replace', {y: tyre.years}) : t('Tyres are {y} years old', {y: tyre.years}),
                     sub: `${name} · ${tyre.madeOn} · ${t('rubber hardens with age regardless of tread')}`,
-                    action: { label: 'Tyres', fn: `Features.openTireModal('${c.id}')` }
+                    action: { label: t('Tyres'), fn: `Features.openTireModal('${c.id}')` }
                 });
             }
             // Part warranties about to lapse — worth checking the part before cover ends
@@ -579,7 +718,7 @@ const Features = {
                     priority: 2, icon: 'shield',
                     title: t('Warranty ending: {part}', {part: w.bill.label || I18N.t(w.bill.kind)}),
                     sub: `${name} · ${w.warranty.detail}${w.bill.vendor ? ' · ' + w.bill.vendor : ''}`,
-                    action: { label: 'View', fn: `App.navigate('warranty')` }
+                    action: { label: t('View'), fn: `App.navigate('warranty')` }
                 });
             });
             // Manual reminders not covered by the schedule
@@ -648,11 +787,11 @@ const Features = {
             const grouped = {};
             fc.items.forEach(i => { grouped[i.type] = (grouped[i.type] || 0) + i.est; });
             forecastHTML = `<div class="card" style="flex:1">
-                <h3>6-Month Cost Forecast</h3>
+                <h3>${t("6-Month Cost Forecast")}</h3>
                 <div class="forecast-total">~ ${fc.total.toFixed(0)} <span>SAR</span></div>
-                <div class="forecast-sub">Estimated upcoming maintenance over the next 6 months</div>
+                <div class="forecast-sub">${t("Estimated upcoming maintenance over the next 6 months")}</div>
                 <div class="forecast-list">${Object.entries(grouped).sort((a, b) => b[1] - a[1]).map(([type, est]) =>
-                    `<div class="forecast-row"><span>${type}</span><span class="forecast-est">~ ${est.toFixed(0)} SAR</span></div>`).join('')}</div>
+                    `<div class="forecast-row"><span>${I18N.t(type)}</span><span class="forecast-est">~ ${est.toFixed(0)} SAR</span></div>`).join('')}</div>
             </div>`;
         }
 
@@ -661,10 +800,10 @@ const Features = {
         const tcoCars = cars.filter(c => carId === 'all' || c.id === carId).map(c => ({ c, cpk: Storage.getCostPerKm(c.id) })).filter(x => x.cpk !== null);
         if (tcoCars.length) {
             tcoHTML = `<div class="card" style="flex:1">
-                <h3>Running Cost (per km)</h3>
+                <h3>${t("Running Cost (per km)")}</h3>
                 <div class="tco-list">${tcoCars.map(({ c, cpk }) =>
                     `<div class="tco-row"><span class="tco-name">${c.make} ${c.model}</span><span class="tco-val">${cpk.toFixed(2)} <small>SAR/km</small></span></div>`).join('')}</div>
-                <div class="forecast-sub" style="margin-top:10px">Total spend ÷ distance driven (fuel + maintenance)</div>
+                <div class="forecast-sub" style="margin-top:10px">${t("Total spend ÷ distance driven (fuel + maintenance)")}</div>
             </div>`;
         }
 
@@ -765,13 +904,13 @@ const Features = {
 
             pieHTML = `<div class="analytics-row">
                 <div class="card" style="flex:1">
-                    <h3>Expense Breakdown</h3>
+                    <h3>${t("Expense Breakdown")}</h3>
                     <div class="pie-container">
                         <div class="pie-chart" style="background:conic-gradient(${gradientStops})"></div>
-                        <div class="pie-legend">${segments.map(s => `<div class="pie-item"><span class="pie-dot" style="background:${s.color}"></span><span class="pie-label">${s.type}</span><span class="pie-val">${s.cost.toFixed(0)} SAR (${s.pct.toFixed(0)}%)</span></div>`).join('')}</div>
+                        <div class="pie-legend">${segments.map(s => `<div class="pie-item"><span class="pie-dot" style="background:${s.color}"></span><span class="pie-label">${I18N.t(s.type)}</span><span class="pie-val">${s.cost.toFixed(0)} SAR (${s.pct.toFixed(0)}%)</span></div>`).join('')}</div>
                     </div>
                 </div>
-                ${cars.length > 1 ? `<div class="card" style="flex:1"><h3>Cost per Car</h3><div class="car-compare">${cars.map((c, i) => {
+                ${cars.length > 1 ? `<div class="card" style="flex:1"><h3>${t("Cost per Car")}</h3><div class="car-compare">${cars.map((c, i) => {
                     const ct = Storage.getTotalExpenses(c.id);
                     const maxCost = Math.max(...cars.map(cc => Storage.getTotalExpenses(cc.id)), 1);
                     return `<div class="compare-row"><span class="compare-name">${c.make} ${c.model}</span><div class="compare-bar-wrap"><div class="compare-bar" style="width:${(ct/maxCost)*100}%;background:${colors[i%colors.length]}"></div></div><span class="compare-val">${ct.toFixed(0)} SAR</span></div>`;
@@ -783,7 +922,7 @@ const Features = {
         let driveHTML = '';
         const drive = Storage.getDrivingStats(carId);
         if (drive) {
-            driveHTML = `<div class="analytics-row"><div class="card" style="flex:1"><h3>Driving Pattern</h3><div class="drive-stats"><div class="drive-stat"><span class="drive-val">${drive.kmPerDay.toFixed(1)}</span><span class="drive-label">km/day</span></div><div class="drive-stat"><span class="drive-val">${drive.kmPerMonth.toFixed(0)}</span><span class="drive-label">km/month</span></div><div class="drive-stat"><span class="drive-val">${drive.kmPerYear.toFixed(0)}</span><span class="drive-label">km/year (est)</span></div></div></div></div>`;
+            driveHTML = `<div class="analytics-row"><div class="card" style="flex:1"><h3>${t("Driving Pattern")}</h3><div class="drive-stats"><div class="drive-stat"><span class="drive-val">${drive.kmPerDay.toFixed(1)}</span><span class="drive-label">${t("km/day")}</span></div><div class="drive-stat"><span class="drive-val">${drive.kmPerMonth.toFixed(0)}</span><span class="drive-label">${t("km/month")}</span></div><div class="drive-stat"><span class="drive-val">${drive.kmPerYear.toFixed(0)}</span><span class="drive-label">${t("km/year (est)")}</span></div></div></div></div>`;
         }
 
         el.innerHTML = pieHTML + driveHTML;

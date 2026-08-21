@@ -338,7 +338,7 @@ const App = {
             if (existing) Storage.updateReminder(existing.id, { dueDate: due });
             else Storage.addReminder({
                 carId, type: 'Inspection', dueDate: due, dueMileage: '',
-                notes: t('Re-test after a failed inspection'),
+                notes: 'Re-test after a failed inspection',
                 completed: false, autoCreated: true, retest: true
             });
             return;
@@ -503,6 +503,7 @@ const App = {
 
         // Action Center & forecast
         if (typeof Features !== 'undefined') {
+            Features.renderDocuments(cid);
             Features.renderActionCenter(cid);
             Features.renderForecast(cid);
         }
@@ -566,16 +567,16 @@ const App = {
             // Documents: insurance, registration, vehicle warranty
             let docsHTML='';
             const docs=[];
-            if(c.insuranceExpiry){const d=Math.ceil((new Date(c.insuranceExpiry)-new Date())/86400000);docs.push({label:'Insurance',date:c.insuranceExpiry,days:d});}
+            if(c.insuranceExpiry){const d=Math.ceil((new Date(c.insuranceExpiry)-new Date())/86400000);docs.push({label:'Insurance',key:'insuranceExpiry',date:c.insuranceExpiry,days:d});}
             if(c.fahesExpiry){
                 const d=Math.ceil((new Date(c.fahesExpiry)-new Date())/86400000);
                 const lastInsp=Storage.getServices(c.id).filter(s=>Recommendations.isInspectionType(s.type)&&s.inspectionResult)
                     .sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
-                docs.push({label:'Fahes',date:c.fahesExpiry,days:d,
+                docs.push({label:'Periodic Inspection',key:'fahesExpiry',date:c.fahesExpiry,days:d,
                     extra:lastInsp?{result:lastInsp.inspectionResult,centre:lastInsp.inspectionCenter,on:lastInsp.date}:null});
             }
-            if(c.registrationExpiry){const d=Math.ceil((new Date(c.registrationExpiry)-new Date())/86400000);docs.push({label:'Registration',date:c.registrationExpiry,days:d});}
-            if(c.warrantyExpiry){const d=Math.ceil((new Date(c.warrantyExpiry)-new Date())/86400000);docs.push({label:'Warranty',date:c.warrantyExpiry,days:d,warranty:true});}
+            if(c.registrationExpiry){const d=Math.ceil((new Date(c.registrationExpiry)-new Date())/86400000);docs.push({label:'Registration',key:'registrationExpiry',date:c.registrationExpiry,days:d});}
+            if(c.warrantyExpiry){const d=Math.ceil((new Date(c.warrantyExpiry)-new Date())/86400000);docs.push({label:'Warranty',key:'warrantyExpiry',date:c.warrantyExpiry,days:d,warranty:true});}
             if(docs.length){
                 docsHTML=`<div class="car-recs"><div class="car-recs-title">${t("Documents")}</div>${docs.map(doc=>{
                     let sb='';
@@ -583,7 +584,7 @@ const App = {
                     else if(doc.days<0)sb=`<span class="badge badge-red">${t('Expired')}</span>`;
                     else if(doc.days<=30)sb=`<span class="badge badge-orange">${t('{d}d left',{d:doc.days})}</span>`;
                     else sb=`<span class="badge badge-green">${t('Valid')}</span>`;
-                    return `<div class="rec-row"><div class="rec-info"><span class="rec-type">${I18N.t(doc.label)}</span><span class="rec-detail">${doc.warranty?t('Until'):t('Expires')} ${doc.date}</span>${doc.extra?`<span class="rec-detail insp-note ${doc.extra.result}">${t(doc.extra.result==='fail'?'Last inspection failed':doc.extra.result==='advisory'?'Passed with advisories':'Passed')} &middot; ${doc.extra.on}${doc.extra.centre?' &middot; '+doc.extra.centre:''}</span>`:''}</div><div class="rec-status">${sb}</div></div>`;
+                    return `<div class="rec-row rec-row-tap" onclick="Features.openDocumentModal('${c.id}','${doc.key}')"><div class="rec-info"><span class="rec-type">${I18N.t(doc.label)}</span><span class="rec-detail">${doc.warranty?t('Until'):t('Expires')} ${doc.date}</span>${doc.extra?`<span class="rec-detail insp-note ${doc.extra.result}">${t(doc.extra.result==='fail'?'Last inspection failed':doc.extra.result==='advisory'?'Passed with advisories':'Passed')} &middot; ${doc.extra.on}${doc.extra.centre?' &middot; '+doc.extra.centre:''}</span>`:''}</div><div class="rec-status">${sb}</div></div>`;
                 }).join('')}</div>`;
             }
             // Keep-or-sell: maintenance spend over the last year against the car's value
@@ -600,7 +601,7 @@ const App = {
                     </div>
                     ${own.hasValue
                         ? `<div class="own-note">Maintenance is <strong>${Math.round(own.ratio*100)}%</strong> of the car's ${own.value.toLocaleString()} SAR value.${own.verdict==='consider'?' Once yearly upkeep passes about a third of what the car is worth, replacing it usually costs less than keeping it.':own.verdict==='watch'?' Worth watching — still cheaper than replacing.':' Comfortably worth keeping.'}</div>`
-                        : `<div class="own-note">Add a market value in Edit to see whether this car is still worth keeping.</div>`}
+                        : `<div class="own-note">${t("Add a market value in Edit to see whether this car is still worth keeping.")}</div>`}
                 </div>`;
             }
             // Recall / safety notes
@@ -622,11 +623,11 @@ const App = {
                 <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}"><bdi>${h.score}%</bdi> ${t(h.label)}</span></div>
                 <div class="odo-block ${fresh.stale?'odo-stale':''}">
                     <div class="odo-block-main">
-                        <div class="odo-block-label">Odometer${proj.estimated?' <span class="odo-badge">est.</span>':''}</div>
+                        <div class="odo-block-label">${t('Odometer')}${proj.estimated?` <span class="odo-badge">${t('est.')}</span>`:''}</div>
                         <div class="odo-block-value">${effKm?effKm.toLocaleString():'—'} <small>km</small></div>
                         <div class="odo-block-sub">${proj.lastKm?`Last read ${proj.lastKm.toLocaleString()} km${fresh.daysSince!==null?` · ${fresh.daysSince===0?'today':fresh.daysSince+'d ago'}`:''}`:'No reading yet'}${proj.rate?` · ${proj.rate.toFixed(0)} km/day`:''}</div>
                     </div>
-                    <button class="btn btn-primary btn-sm odo-block-btn" onclick="Features.openOdometerModal('${c.id}')">Update</button>
+                    <button class="btn btn-primary btn-sm odo-block-btn" onclick="Features.openOdometerModal('${c.id}')">${t('Update')}</button>
                 </div>
                 <div class="car-card-details">
                     <div class="car-detail"><span>${t("Plate")}</span><span>${c.plate||'-'}</span></div>
@@ -680,10 +681,10 @@ const App = {
         const avgCostKm=consumption&&consumption.length?((consumption.reduce((s,c)=>s+parseFloat(c.costPerKm),0)/consumption.length).toFixed(2)):'-';
 
         document.getElementById('fuel-summary').innerHTML=`
-            <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${fuelTotal.toFixed(0)} SAR</span><span class="stat-label">Total Fuel Cost</span></div></div>
-            <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2v20M2 12h20" stroke="currentColor" stroke-width="2"/></svg></div><div class="stat-info"><span class="stat-value">${totalLiters.toFixed(0)} L</span><span class="stat-label">Total Liters</span></div></div>
-            <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${avgConsumption} L/100km</span><span class="stat-label">Avg Consumption</span></div></div>
-            <div class="stat-card"><div class="stat-icon red"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${avgCostKm} SAR/km</span><span class="stat-label">Cost per km</span></div></div>`;
+            <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${fuelTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Total Fuel Cost")}</span></div></div>
+            <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2v20M2 12h20" stroke="currentColor" stroke-width="2"/></svg></div><div class="stat-info"><span class="stat-value">${totalLiters.toFixed(0)} L</span><span class="stat-label">${t("Total Liters")}</span></div></div>
+            <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${avgConsumption} L/100km</span><span class="stat-label">${t("Avg Consumption")}</span></div></div>
+            <div class="stat-card"><div class="stat-icon red"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${avgCostKm} SAR/km</span><span class="stat-label">${t("Cost per km")}</span></div></div>`;
 
         // Chart
         const chartEl=document.getElementById('fuel-chart');
@@ -691,7 +692,7 @@ const App = {
             chartEl.style.display='block';
             const last8=consumption.slice(-8);
             const maxV=Math.max(...last8.map(c=>parseFloat(c.lPer100km)),1);
-            chartEl.innerHTML=`<h3>Fuel Consumption Trend</h3><div class="bar-chart">${last8.map(c=>{const pct=(parseFloat(c.lPer100km)/maxV)*100;return `<div class="bar-group"><span class="bar-value">${c.lPer100km}</span><div class="bar fuel-bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${c.date.substring(5)}</span></div>`;}).join('')}</div>`;
+            chartEl.innerHTML=`<h3>${t("Fuel Consumption Trend")}</h3><div class="bar-chart">${last8.map(c=>{const pct=(parseFloat(c.lPer100km)/maxV)*100;return `<div class="bar-group"><span class="bar-value">${c.lPer100km}</span><div class="bar fuel-bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${c.date.substring(5)}</span></div>`;}).join('')}</div>`;
         } else { chartEl.style.display='none'; }
 
         const el=document.getElementById('fuel-list');
@@ -709,22 +710,22 @@ const App = {
         const months=Object.keys(monthlyData).sort().slice(-6), maxVal=Math.max(...months.map(m=>monthlyData[m]),1);
 
         document.getElementById('expenses-summary').innerHTML=`
-            <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${grandTotal.toFixed(0)} SAR</span><span class="stat-label">Total Spent</span></div></div>
-            <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${svcTotal.toFixed(0)} SAR</span><span class="stat-label">Maintenance</span></div></div>
-            <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${fuelTotal.toFixed(0)} SAR</span><span class="stat-label">Fuel</span></div></div>`;
+            <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${grandTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Total Spent")}</span></div></div>
+            <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${svcTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Maintenance")}</span></div></div>
+            <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${fuelTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Fuel")}</span></div></div>`;
 
         if(typeof Features!=='undefined') Features.renderServiceInsights(cid);
         const el=document.getElementById('expenses-list');
         let chartHTML='';
-        if(months.length>0) chartHTML=`<div class="chart-container"><h3>Monthly Expenses</h3><div class="bar-chart">${months.map(m=>{const pct=(monthlyData[m]/maxVal)*100;return `<div class="bar-group"><span class="bar-value">${monthlyData[m].toFixed(0)}</span><div class="bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${m.substring(5)}</span></div>`;}).join('')}</div></div>`;
+        if(months.length>0) chartHTML=`<div class="chart-container"><h3>${t("Monthly Expenses")}</h3><div class="bar-chart">${months.map(m=>{const pct=(monthlyData[m]/maxVal)*100;return `<div class="bar-group"><span class="bar-value">${monthlyData[m].toFixed(0)}</span><div class="bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${m.substring(5)}</span></div>`;}).join('')}</div></div>`;
 
         const allExpenses=[
-            ...services.map(s=>({date:s.date,carId:s.carId,desc:s.type+((s.bills&&s.bills.length)?` (${s.bills.length} bill${s.bills.length>1?'s':''})`:''),cost:Storage.getServiceCost(s),category:'Service'})),
-            ...Storage.getFuelLogs(cid).map(f=>({date:f.date,carId:f.carId,desc:'Fuel ('+f.liters+' L)',cost:parseFloat(f.totalCost||0),category:'Fuel'}))
+            ...services.map(s=>({date:s.date,carId:s.carId,desc:I18N.t(s.type)+((s.bills&&s.bills.length)?` (${s.bills.length} bill${s.bills.length>1?'s':''})`:''),cost:Storage.getServiceCost(s),category:'Service'})),
+            ...Storage.getFuelLogs(cid).map(f=>({date:f.date,carId:f.carId,desc:t('Fuel')+' ('+f.liters+' L)',cost:parseFloat(f.totalCost||0),category:'Fuel'}))
         ].sort((a,b)=>new Date(b.date)-new Date(a.date));
 
         if(!allExpenses.length){el.innerHTML=chartHTML+'<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="20" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M32 20v24M26 24c0-2 2.7-3.5 6-3.5s6 1.5 6 3.5-2.7 3.5-6 3.5-6 1.5-6 3.5 2.7 3.5 6 3.5 6 1.5 6 3.5c0 2-2.7 3.5-6 3.5s-6-1.5-6-3.5" stroke="var(--text3)" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div><p class="empty-state-text">${t("No expenses yet")}</p></div>';return;}
-        el.innerHTML=chartHTML+`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Description")}</th><th>${t("Category")}</th><th>${t("Cost")}</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td data-label="${t('Date')}">${e.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Description')}">${e.desc}</td><td data-label="${t('Category')}"><span class="badge ${e.category==='Fuel'?'badge-orange':'badge-green'}">${e.category}</span></td><td data-label="${t('Cost')}"><strong>${e.cost.toFixed(0)} SAR</strong></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=chartHTML+`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Description")}</th><th>${t("Category")}</th><th>${t("Cost")}</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td data-label="${t('Date')}">${e.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Description')}">${e.desc}</td><td data-label="${t('Category')}"><span class="badge ${e.category==='Fuel'?'badge-orange':'badge-green'}">${t(e.category)}</span></td><td data-label="${t('Cost')}"><strong>${e.cost.toFixed(0)} SAR</strong></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Reminders ──
@@ -741,7 +742,7 @@ const App = {
             const sl=r.completed
                 ?'<span class="badge badge-green">${t("Done")}</span>'
                 :`<span class="badge badge-${badgeMap[st.status]}">${st.detail}</span>`;
-            return `<div class="reminder-card ${sc}"><div class="reminder-card-header"><span class="reminder-card-title">${I18N.t(r.type)}</span>${sl}</div><div class="reminder-card-car">${car?car.year+' '+car.make+' '+car.model:''}</div><div class="reminder-card-date">Due: ${r.dueDate}${r.dueMileage?' or at '+parseInt(r.dueMileage).toLocaleString()+' km':''}</div>${r.notes?`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${r.notes}</div>`:''}<div class="reminder-card-actions">${!r.completed?`<button class="btn btn-primary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:true});App.renderPage(App.currentPage);">${t("Done")}</button>`:`<button class="btn btn-secondary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:false});App.renderPage(App.currentPage);">${t("Undo")}</button>`}${!r.completed?`<button class="btn btn-secondary btn-sm" onclick="Storage.snoozeReminder('${r.id}',7);App.renderPage(App.currentPage);">${t("Snooze 1w")}</button>`:''}<button class="btn btn-secondary btn-sm" onclick="App.openReminderModal(Storage.getReminders().find(x=>x.id==='${r.id}'))">${t("Edit")}</button><button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteReminder('${r.id}');App.renderPage(App.currentPage);}">Del</button></div></div>`;
+            return `<div class="reminder-card ${sc}"><div class="reminder-card-header"><span class="reminder-card-title">${I18N.t(r.type)}</span>${sl}</div><div class="reminder-card-car">${car?car.year+' '+car.make+' '+car.model:''}</div><div class="reminder-card-date">${t("Due")}: ${r.dueDate}${r.dueMileage?' or at '+parseInt(r.dueMileage).toLocaleString()+' km':''}</div>${r.notes?`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${t(r.notes)}</div>`:''}<div class="reminder-card-actions">${!r.completed?`<button class="btn btn-primary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:true});App.renderPage(App.currentPage);">${t("Done")}</button>`:`<button class="btn btn-secondary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:false});App.renderPage(App.currentPage);">${t("Undo")}</button>`}${!r.completed?`<button class="btn btn-secondary btn-sm" onclick="Storage.snoozeReminder('${r.id}',7);App.renderPage(App.currentPage);">${t("Snooze 1w")}</button>`:''}<button class="btn btn-secondary btn-sm" onclick="App.openReminderModal(Storage.getReminders().find(x=>x.id==='${r.id}'))">${t("Edit")}</button><button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteReminder('${r.id}');App.renderPage(App.currentPage);}">${t('Delete')}</button></div></div>`;
         }).join('');
     }
 };
