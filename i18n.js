@@ -378,6 +378,13 @@ const I18N = {
             'Add a market value in Edit to see whether this car is still worth keeping.': 'أضف القيمة السوقية من التعديل لمعرفة إن كانت السيارة تستحق الاحتفاظ بها.',
             'Auto: from the date on your car record': 'تلقائي: من التاريخ المسجّل في بيانات سيارتك',
             'Tyres': 'الإطارات',
+            'Dammam Centre': 'مركز الدمام',
+            'Khobar Centre': 'مركز الخبر',
+            'Valid until': 'سارية حتى',
+            'Standard one year': 'المدة المعتادة سنة',
+            'Certificate': 'الشهادة',
+            'None — a re-test is due in 30 days': 'لا توجد — إعادة الفحص خلال ٣٠ يوم',
+            'Please choose the date of inspection.': 'الرجاء اختيار تاريخ الفحص.',
             'Due today': 'مستحق اليوم',
         }
     }

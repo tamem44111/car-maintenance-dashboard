@@ -428,6 +428,18 @@ const Features = {
     // Insurance, Istimara and the periodic inspection are the things people
     // actually get fined for. They belong together, on the first screen, each
     // one tappable — not buried in a car form or a list of service types.
+    // Certificates run a standard year, so the expiry is derived from the
+    // inspection date rather than typed. Centres are a short list for now.
+    INSPECTION_MONTHS: 12,
+    INSPECTION_CENTRES: ['Dammam Centre', 'Khobar Centre'],
+
+    certificateExpiry(fromDate) {
+        const d = new Date(fromDate || Date.now());
+        if (isNaN(d)) return '';
+        d.setMonth(d.getMonth() + this.INSPECTION_MONTHS);
+        return d.toISOString().split('T')[0];
+    },
+
     DOCS: [
         { key: 'insuranceExpiry',    label: 'Insurance',           icon: 'shield' },
         { key: 'registrationExpiry', label: 'Registration',        icon: 'doc' },
@@ -494,7 +506,7 @@ const Features = {
                 : 'Update the expiry date shown on the document.')}</p>
             ${isInspection ? `
             <div class="form-row">
-                <div class="form-group"><label>${t('Date of inspection')}</label><input type="date" id="d-date" value="${today}"></div>
+                <div class="form-group"><label>${t('Date of inspection')}</label><input type="date" id="d-date" value="${today}" onchange="Features._docResultChanged()"></div>
                 <div class="form-group"><label>${t('Result')}</label>
                     <select id="d-result" onchange="Features._docResultChanged()">
                         <option value="pass">${t('Passed')}</option>
@@ -502,21 +514,23 @@ const Features = {
                         <option value="fail">${t('Failed')}</option>
                     </select>
                 </div>
-            </div>` : ''}
-            <div class="form-group">
-                <label>${t(isInspection ? 'Certificate valid until' : 'Expiry date')}</label>
-                <input type="date" id="d-expiry" value="${car[key] || ''}">
-                <small id="d-expiry-note" class="field-note"></small>
             </div>
-            ${isInspection ? `
+            <div class="derived" id="d-derived"></div>
             <div class="form-row">
-                <div class="form-group"><label>${t('Inspection centre')}</label><input type="text" id="d-centre" placeholder="${t('e.g. Fahes Al-Kharj Road')}" value="${last && last.inspectionCenter ? String(last.inspectionCenter).replace(/"/g, '&quot;') : ''}"></div>
+                <div class="form-group"><label>${t('Inspection centre')}</label>
+                    <select id="d-centre">${Features.INSPECTION_CENTRES.map(c =>
+                        `<option value="${c}" ${last && last.inspectionCenter === c ? 'selected' : ''}>${t(c)}</option>`).join('')}</select>
+                </div>
                 <div class="form-group"><label>${t('Cost (SAR)')}</label><input type="number" id="d-cost" placeholder="0"></div>
-            </div>` : ''}`;
+            </div>` : `
+            <div class="form-group">
+                <label>${t('Expiry date')}</label>
+                <input type="date" id="d-expiry" value="${car[key] || ''}">
+            </div>`}`;
 
         App.openModal(t(doc.label), html, () => {
-            const expiry = document.getElementById('d-expiry').value;
             if (!isInspection) {
+                const expiry = document.getElementById('d-expiry').value;
                 if (!expiry) return alert(t('Please choose the expiry date.'));
                 Storage.updateCar(carId, { [key]: expiry });
                 Storage.syncDocumentReminders(carId);
@@ -525,7 +539,9 @@ const Features = {
             }
             const result = document.getElementById('d-result').value;
             const date = document.getElementById('d-date').value || today;
-            if (result !== 'fail' && !expiry) return alert(t('Please choose the certificate expiry date.'));
+            if (!date) return alert(t('Please choose the date of inspection.'));
+            // a year from the inspection date; a failure earns no certificate
+            const expiry = result === 'fail' ? '' : Features.certificateExpiry(date);
             // logged as a service so it keeps cost, history and search
             Storage.addService({
                 carId, type: 'Periodic Inspection', date,
@@ -544,24 +560,20 @@ const Features = {
 
     // A failure grants no cover, so the expiry field is not the thing to fill in
     _docResultChanged() {
-        const res = document.getElementById('d-result');
-        const exp = document.getElementById('d-expiry');
-        const note = document.getElementById('d-expiry-note');
-        if (!exp) return;
-        if (res && res.value === 'fail') {
-            exp.disabled = true;
-            exp.classList.add('input-locked');
-            if (note) note.textContent = t('A failed inspection gives no cover — a re-test reminder is set for 30 days.');
-        } else {
-            exp.disabled = false;
-            exp.classList.remove('input-locked');
-            if (note) note.textContent = t('Usually one year from the inspection date.');
-            if (res && !exp.value) {
-                const d = new Date(document.getElementById('d-date') ? document.getElementById('d-date').value : Date.now());
-                d.setFullYear(d.getFullYear() + 1);
-                exp.value = d.toISOString().split('T')[0];
-            }
+        const box = document.getElementById('d-derived');
+        if (!box) return;
+        const failed = (document.getElementById('d-result') || {}).value === 'fail';
+        const date = (document.getElementById('d-date') || {}).value;
+        if (failed) {
+            box.className = 'derived derived-warn';
+            box.innerHTML = `<span class="derived-label">${t('Certificate')}</span>
+                <span class="derived-value">${t('None — a re-test is due in 30 days')}</span>`;
+            return;
         }
+        box.className = 'derived';
+        box.innerHTML = `<span class="derived-label">${t('Valid until')}</span>
+            <span class="derived-value">${Features.certificateExpiry(date) || '—'}</span>
+            <span class="derived-note">${t('Standard one year')}</span>`;
     },
 
     // ── Service Insights ──

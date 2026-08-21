@@ -251,15 +251,17 @@ const App = {
             <div id="inspection-options" style="display:none">
                 <div class="form-row">
                     <div class="form-group"><label>${t('Result')}</label>
-                        <select id="f-insp-result">
+                        <select id="f-insp-result" onchange="App._toggleServiceExtras()">
                             <option value="pass" ${service&&service.inspectionResult==='pass'?'selected':''}>${t('Passed')}</option>
                             <option value="advisory" ${service&&service.inspectionResult==='advisory'?'selected':''}>${t('Passed with advisories')}</option>
                             <option value="fail" ${service&&service.inspectionResult==='fail'?'selected':''}>${t('Failed')}</option>
                         </select>
                     </div>
-                    <div class="form-group"><label>${t('Certificate valid until')}</label><input type="date" id="f-insp-expiry" value="${service&&service.inspectionExpiry?service.inspectionExpiry:''}"><small class="field-note">${t('Updates the Fahes date on your car')}</small></div>
+                    <div class="form-group"><label>${t('Inspection centre')}</label>
+                        <select id="f-insp-centre">${Features.INSPECTION_CENTRES.map(c=>`<option value="${c}" ${service&&service.inspectionCenter===c?'selected':''}>${t(c)}</option>`).join('')}</select>
+                    </div>
                 </div>
-                <div class="form-group"><label>${t('Inspection centre')}</label><input type="text" id="f-insp-centre" placeholder="${t('e.g. Fahes Al-Kharj Road')}" value="${service&&service.inspectionCenter?String(service.inspectionCenter).replace(/"/g,'&quot;'):''}"></div>
+                <div class="derived" id="f-insp-derived"></div>
             </div>
             <div id="brake-options" style="display:none">
                 <div class="form-group"><label>Brake Pad Thickness (mm)</label><input type="number" id="f-pad" step="0.5" placeholder="e.g. 7" value="${service&&service.padThickness?service.padThickness:''}"><small class="field-note">New pads are about 10–12 mm; replace at 3 mm. Logging this predicts wear far better than a fixed interval.</small></div>
@@ -277,8 +279,9 @@ const App = {
             const inspEl=document.getElementById('f-insp-result');
             const insp = inspEl ? {
                 inspectionResult: inspEl.value,
-                inspectionExpiry: document.getElementById('f-insp-expiry').value,
-                inspectionCenter: document.getElementById('f-insp-centre').value.trim()
+                // a year from the service date; a failure earns no certificate
+                inspectionExpiry: inspEl.value === 'fail' ? '' : Features.certificateExpiry(date),
+                inspectionCenter: document.getElementById('f-insp-centre').value
             } : {};
             if(isEdit){
                 const editType=document.getElementById('f-type').value;
@@ -354,6 +357,20 @@ const App = {
         }
     },
 
+    _paintInspectionDerived() {
+        const box = document.getElementById('f-insp-derived');
+        if (!box) return;
+        const failed = (document.getElementById('f-insp-result') || {}).value === 'fail';
+        const date = (document.getElementById('f-date') || {}).value;
+        if (failed) {
+            box.className = 'derived derived-warn';
+            box.innerHTML = `<span class="derived-label">${t('Certificate')}</span><span class="derived-value">${t('None — a re-test is due in 30 days')}</span>`;
+        } else {
+            box.className = 'derived';
+            box.innerHTML = `<span class="derived-label">${t('Valid until')}</span><span class="derived-value">${Features.certificateExpiry(date) || '—'}</span><span class="derived-note">${t('Standard one year')}</span>`;
+        }
+    },
+
     // Show the oil-interval / brake-pad extras only for the service types they belong to
     _toggleServiceExtras() {
         const sel = document.getElementById('f-type');
@@ -368,14 +385,7 @@ const App = {
         if (insp) {
             const on = picked.some(t => Recommendations.isInspectionType(t));
             insp.style.display = on ? 'block' : 'none';
-            // default the certificate to a year from the service date
-            const exp = document.getElementById('f-insp-expiry');
-            const dateEl = document.getElementById('f-date');
-            if (on && exp && !exp.value && dateEl && dateEl.value) {
-                const d = new Date(dateEl.value);
-                d.setFullYear(d.getFullYear() + 1);
-                exp.value = d.toISOString().split('T')[0];
-            }
+            if (on) this._paintInspectionDerived();
         }
     },
 

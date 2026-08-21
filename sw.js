@@ -1,4 +1,4 @@
-const CACHE = 'autocare-v21';
+const CACHE = 'autocare-v22';
 const ASSETS = ['./', './index.html', './styles.css', './i18n.js', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
