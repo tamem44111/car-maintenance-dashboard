@@ -41,6 +41,11 @@ is never mistaken for a reading.
 **Climate multiplier.** Severe mode (`autocare_climate`) shortens every interval by 20%. It lives in its
 own localStorage key and **must** be included in backups — omitting it silently lengthens every interval.
 
+**The inspection certificate is derived, not typed.** It runs a standard year
+(`Features.INSPECTION_MONTHS`), computed from the inspection date and shown as a read-out.
+A failure yields no certificate and books a re-test in 30 days instead. Centres come from
+`Features.INSPECTION_CENTRES` (Dammam, Khobar) — extend that array to add more.
+
 **Fuel is excluded from keep-or-sell.** You would pay it on any car, so it says nothing about whether
 *this* car is worth keeping. Only maintenance counts toward the verdict.
 
