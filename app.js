@@ -245,7 +245,7 @@ const App = {
                 </div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}"></div>
+                <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}" onchange="App._toggleServiceExtras()"></div>
                 <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
             <div id="inspection-options" style="display:none">
@@ -258,9 +258,10 @@ const App = {
                         </select>
                     </div>
                     <div class="form-group"><label>${t('Inspection centre')}</label>
-                        <select id="f-insp-centre">${Features.INSPECTION_CENTRES.map(c=>`<option value="${c}" ${service&&service.inspectionCenter===c?'selected':''}>${t(c)}</option>`).join('')}</select>
+                        <select id="f-insp-centre"><option value="">${t('Not recorded')}</option>${Features.INSPECTION_CENTRES.map(c=>`<option value="${c}" ${service&&service.inspectionCenter===c?'selected':''}>${t(c)}</option>`).join('')}</select>
                     </div>
                 </div>
+                <div class="form-group" id="f-insp-expiry-wrap"><label>${t('Certificate expires')}</label><input type="date" id="f-insp-expiry" data-auto="${service&&service.inspectionExpiry?'0':'1'}" value="${service&&service.inspectionExpiry?service.inspectionExpiry:''}" oninput="this.dataset.auto='0'"><small class="field-note">${t('Suggested a year after the date above — edit it if your certificate says otherwise.')}</small></div>
                 <div class="derived" id="f-insp-derived"></div>
             </div>
             <div id="brake-options" style="display:none">
@@ -277,10 +278,12 @@ const App = {
             const padEl=document.getElementById('f-pad');
             const padThickness=padEl?padEl.value.trim():'';
             const inspEl=document.getElementById('f-insp-result');
+            const inspExpEl = document.getElementById('f-insp-expiry');
             const insp = inspEl ? {
                 inspectionResult: inspEl.value,
-                // a year from the service date; a failure earns no certificate
-                inspectionExpiry: inspEl.value === 'fail' ? '' : Features.certificateExpiry(date),
+                // whatever the certificate says; a failure earns no certificate at all
+                inspectionExpiry: inspEl.value === 'fail' ? ''
+                    : ((inspExpEl && inspExpEl.value) || Features.certificateExpiry(date)),
                 inspectionCenter: document.getElementById('f-insp-centre').value
             } : {};
             if(isEdit){
@@ -362,13 +365,20 @@ const App = {
         if (!box) return;
         const failed = (document.getElementById('f-insp-result') || {}).value === 'fail';
         const date = (document.getElementById('f-date') || {}).value;
+        const exp = document.getElementById('f-insp-expiry');
+        const wrap = document.getElementById('f-insp-expiry-wrap');
+        // A failure earns no certificate, so there is no expiry to ask for
+        if (wrap) wrap.style.display = failed ? 'none' : '';
         if (failed) {
+            box.style.display = '';
             box.className = 'derived derived-warn';
             box.innerHTML = `<span class="derived-label">${t('Certificate')}</span><span class="derived-value">${t('None — a re-test is due in 30 days')}</span>`;
-        } else {
-            box.className = 'derived';
-            box.innerHTML = `<span class="derived-label">${t('Valid until')}</span><span class="derived-value">${Features.certificateExpiry(date) || '—'}</span><span class="derived-note">${t('Standard one year')}</span>`;
+            return;
         }
+        box.style.display = 'none';
+        box.innerHTML = '';
+        // Keep suggesting a year out until the owner types their own date
+        if (exp && exp.dataset.auto === '1') exp.value = Features.certificateExpiry(date) || '';
     },
 
     // Show the oil-interval / brake-pad extras only for the service types they belong to

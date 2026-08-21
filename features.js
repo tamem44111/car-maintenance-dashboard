@@ -428,8 +428,10 @@ const Features = {
     // Insurance, Istimara and the periodic inspection are the things people
     // actually get fined for. They belong together, on the first screen, each
     // one tappable — not buried in a car form or a list of service types.
-    // Certificates run a standard year, so the expiry is derived from the
-    // inspection date rather than typed. Centres are a short list for now.
+    // The expiry date is the fact the owner actually holds — it is printed on the
+    // certificate, while the date of the test is not something anyone remembers.
+    // So the expiry is typed, and the inspection date is derived from it when a
+    // history record is worth keeping. Centres are a short list for now.
     INSPECTION_MONTHS: 12,
     INSPECTION_CENTRES: ['Dammam Centre', 'Khobar Centre'],
 
@@ -437,6 +439,17 @@ const Features = {
         const d = new Date(fromDate || Date.now());
         if (isNaN(d)) return '';
         d.setMonth(d.getMonth() + this.INSPECTION_MONTHS);
+        return d.toISOString().split('T')[0];
+    },
+
+    // The inverse: given only an expiry, the test was a standard year earlier.
+    // This is an estimate, which is why records dated this way carry NO mileage —
+    // a guessed date paired with today's odometer would land a false reading in
+    // getOdometerReadings and wreck the km/day rate every projection depends on.
+    inspectionDateFrom(expiryDate) {
+        const d = new Date(expiryDate || Date.now());
+        if (isNaN(d)) return '';
+        d.setMonth(d.getMonth() - this.INSPECTION_MONTHS);
         return d.toISOString().split('T')[0];
     },
 
@@ -502,27 +515,30 @@ const Features = {
 
         const html = `
             <p class="doc-intro">${t(isInspection
-                ? 'Record the inspection you just had. A pass updates the expiry date automatically.'
+                ? 'Enter the expiry date printed on your certificate. Everything below it is optional.'
                 : 'Update the expiry date shown on the document.')}</p>
             ${isInspection ? `
-            <div class="form-row">
-                <div class="form-group"><label>${t('Date of inspection')}</label><input type="date" id="d-date" value="${today}" onchange="Features._docResultChanged()"></div>
-                <div class="form-group"><label>${t('Result')}</label>
-                    <select id="d-result" onchange="Features._docResultChanged()">
-                        <option value="pass">${t('Passed')}</option>
-                        <option value="advisory">${t('Passed with advisories')}</option>
-                        <option value="fail">${t('Failed')}</option>
-                    </select>
-                </div>
+            <div class="form-group" id="d-expiry-wrap">
+                <label>${t('Expiry date')}</label>
+                <input type="date" id="d-expiry" value="${car[key] || ''}">
+                <small class="field-note">${t('The date printed on your certificate.')}</small>
+            </div>
+            <div class="form-group"><label>${t('Result')}</label>
+                <select id="d-result" onchange="Features._docResultChanged()">
+                    <option value="pass">${t('Passed')}</option>
+                    <option value="advisory">${t('Passed with advisories')}</option>
+                    <option value="fail">${t('Failed')}</option>
+                </select>
             </div>
             <div class="derived" id="d-derived"></div>
             <div class="form-row">
                 <div class="form-group"><label>${t('Inspection centre')}</label>
-                    <select id="d-centre">${Features.INSPECTION_CENTRES.map(c =>
+                    <select id="d-centre"><option value="">${t('Not recorded')}</option>${Features.INSPECTION_CENTRES.map(c =>
                         `<option value="${c}" ${last && last.inspectionCenter === c ? 'selected' : ''}>${t(c)}</option>`).join('')}</select>
                 </div>
                 <div class="form-group"><label>${t('Cost (SAR)')}</label><input type="number" id="d-cost" placeholder="0"></div>
-            </div>` : `
+            </div>
+            <small class="field-note">${t('Filling in a centre or a cost also saves this to your service history.')}</small>` : `
             <div class="form-group">
                 <label>${t('Expiry date')}</label>
                 <input type="date" id="d-expiry" value="${car[key] || ''}">
@@ -538,42 +554,56 @@ const Features = {
                 return;
             }
             const result = document.getElementById('d-result').value;
-            const date = document.getElementById('d-date').value || today;
-            if (!date) return alert(t('Please choose the date of inspection.'));
-            // a year from the inspection date; a failure earns no certificate
-            const expiry = result === 'fail' ? '' : Features.certificateExpiry(date);
-            // logged as a service so it keeps cost, history and search
-            Storage.addService({
-                carId, type: 'Periodic Inspection', date,
-                cost: document.getElementById('d-cost').value || '0',
-                mileage: String(Storage.getEffectiveMileage(car) || ''),
-                notes: '', bills: [],
-                inspectionResult: result,
-                inspectionExpiry: expiry,
-                inspectionCenter: document.getElementById('d-centre').value.trim()
-            });
-            App._applyInspection(carId, { inspectionResult: result, inspectionExpiry: expiry }, date);
+            const failed = result === 'fail';
+            const expiry = failed ? '' : document.getElementById('d-expiry').value;
+            const centre = document.getElementById('d-centre').value.trim();
+            const cost = document.getElementById('d-cost').value.trim();
+            if (!failed && !expiry) return alert(t('Please choose the expiry date.'));
+
+            // Only keep a service record when there is something in it beyond the
+            // date itself — otherwise correcting a typo would file a second inspection.
+            if (centre || cost || result !== 'pass') {
+                // A failure happened recently enough to be worth dating today; a pass
+                // is dated back from the expiry, and carries no mileage because that
+                // date is a guess (see inspectionDateFrom).
+                Storage.addService({
+                    carId, type: 'Periodic Inspection',
+                    date: failed ? today : Features.inspectionDateFrom(expiry),
+                    cost: cost || '0',
+                    mileage: failed ? String(Storage.getEffectiveMileage(car) || '') : '',
+                    notes: failed ? '' : 'Date estimated from the certificate expiry',
+                    bills: [],
+                    inspectionResult: result,
+                    inspectionExpiry: expiry,
+                    inspectionCenter: centre
+                });
+            }
+            // Sets fahesExpiry on a pass, or books the 30-day re-test from today on a failure
+            App._applyInspection(carId, { inspectionResult: result, inspectionExpiry: expiry }, today);
             App.closeModal(); App.renderPage(App.currentPage);
         });
         setTimeout(() => this._docResultChanged(), 40);
     },
 
-    // A failure grants no cover, so the expiry field is not the thing to fill in
+    // A failure grants no certificate, so there is no expiry to type — the field
+    // is taken away rather than left there inviting a made-up date.
     _docResultChanged() {
         const box = document.getElementById('d-derived');
+        const wrap = document.getElementById('d-expiry-wrap');
         if (!box) return;
         const failed = (document.getElementById('d-result') || {}).value === 'fail';
-        const date = (document.getElementById('d-date') || {}).value;
+        if (wrap) wrap.style.display = failed ? 'none' : '';
         if (failed) {
+            box.style.display = '';
             box.className = 'derived derived-warn';
             box.innerHTML = `<span class="derived-label">${t('Certificate')}</span>
-                <span class="derived-value">${t('None — a re-test is due in 30 days')}</span>`;
+                <span class="derived-value">${t('None — a re-test is due in 30 days')}</span>
+                <span class="derived-note">${t('Counted from today')}</span>`;
             return;
         }
-        box.className = 'derived';
-        box.innerHTML = `<span class="derived-label">${t('Valid until')}</span>
-            <span class="derived-value">${Features.certificateExpiry(date) || '—'}</span>
-            <span class="derived-note">${t('Standard one year')}</span>`;
+        // On a pass the expiry is typed, not worked out, so there is nothing to show
+        box.style.display = 'none';
+        box.innerHTML = '';
     },
 
     // ── Service Insights ──
