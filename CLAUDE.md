@@ -44,7 +44,15 @@ like insurance" meant the Documents card — not a chip in a list of twenty-one 
 strings the eye misses.
 
 **Ask with options.** When a decision is genuinely his, use multiple choice with the trade-offs
-spelled out — never an open-ended prose question.
+spelled out — never an open-ended prose question. Ask for everything you need *before*
+answering, so the first answer is the right one instead of a guess that needs correcting.
+
+**Keep answers short.** State the problem in a line or two, then give practical options.
+Lead with the recommendation, not the reasoning. Evidence and verification detail stay
+available but out of the answer unless they change a decision. He is optimising for
+decisions per minute.
+
+**Never publish an Artifact unless he asks.** A published page is more to read, not less.
 
 **Verify against his real data when it is relevant.** His backup file exposed things no
 synthetic test would: oil changed at 4,086 km against a 9,600 km schedule, and an odometer
