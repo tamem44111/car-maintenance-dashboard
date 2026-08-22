@@ -699,6 +699,9 @@ const App = {
                     <div class="car-detail"><span>${t("Services")}</span><span>${sc}</span></div>
                     <div class="car-detail"><span>${t("Total Spent")}</span><span>${tc.toFixed(0)} SAR</span></div>
                     ${cpk!==null?`<div class="car-detail"><span>${t("Running Cost")}</span><span>${cpk.toFixed(2)} SAR/km</span></div>${Features.costSplitLine(c.id)}`:''}
+                    ${(()=>{const ty=Storage.getTyreStatus(c);if(!ty)return '';
+                        const cls=ty.status==='replace'?'red':ty.status==='soon'?'orange':'green';
+                        return `<div class="car-detail"><span>${t('Tyres')}</span><span class="tyre-state ${cls}">${ty.detail}</span></div>`;})()}
                 </div>
                 ${recallHTML}${ownHTML}${docsHTML}${recsHTML}${tireHTML}
                 <div class="car-card-actions">

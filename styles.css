@@ -2087,3 +2087,8 @@ tr:hover td { background: var(--card-hover); }
 .backfill-name { font-size: 13px; font-weight: 600; color: var(--text); }
 .backfill-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .backfill-inputs input { width: 100%; }
+
+/* Tyre state on the car card — coloured by whichever runs out first, km or age. */
+.tyre-state.red { color: var(--red); font-weight: 600; }
+.tyre-state.orange { color: var(--orange); font-weight: 600; }
+.tyre-state.green { color: var(--text2); }

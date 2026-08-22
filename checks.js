@@ -181,6 +181,33 @@ const Checks = {
         this.eq('a backfilled item now has a due date', typeof after.dueDate, 'string');
         this.seed(A.W);
 
+        // -- tyres: judged on distance and on rubber age, whichever binds first --
+        this.eq('with no tyre information there is no status', Storage.getTyreStatus(car), null);
+        this.ok('Tires is loggable', Recommendations.logTypes().includes('Tires'));
+        this.ok('Tires is not in the generic schedule', !Recommendations.ALL_TYPES.includes('Tires'));
+
+        // fitted 45,000 km ago on a 50,000 km life -> near the end on distance
+        Storage.updateCar('test-car', { tires: { brand: 'Michelin', size: '215/55R17', installedDate: day(300), installedMileage: '55000' } });
+        A.W.localStorage.setItem('autocare_climate', 'normal');
+        const worn = Storage.getTyreStatus(Storage.getCars()[0]);
+        this.eq('distance covered on the set is measured', worn.kmOnSet, 100000 - 55000);
+        this.eq('distance is what binds, not age', worn.reason, 'km');
+        this.eq('a set at 45,000 of 50,000 km reads as due soon', worn.status, 'soon');
+        this.ok('remaining distance is converted to days at this car\'s rate', worn.daysLeft > 0, String(worn.daysLeft));
+
+        // a logged replacement is newer than the tyre record, and must win
+        Storage.addService({ carId: 'test-car', type: 'Tires', date: day(5), mileage: '99500', cost: '1600' });
+        const fresh2 = Storage.getTyreStatus(Storage.getCars()[0]);
+        this.eq('a logged replacement resets the set', fresh2.kmOnSet, 100000 - 99500);
+        this.eq('a fresh set reads ok', fresh2.status, 'ok');
+
+        // rubber age can condemn a set the tread would pass
+        Storage.updateCar('test-car', { tires: { installedDate: day(5), installedMileage: '99500', manufactureDate: '2018-06' } });
+        const old2 = Storage.getTyreStatus(Storage.getCars()[0]);
+        this.eq('age condemns a set with plenty of tread left', old2.status, 'replace');
+        this.eq('and says age was the reason', old2.reason, 'age');
+        this.seed(A.W);
+
         // -- the picker's grouping must stay in step with the type lists --
         const grouped = Recommendations.GROUPS.flatMap(g => g[1]);
         const dupes = grouped.filter((t, i) => grouped.indexOf(t) !== i);

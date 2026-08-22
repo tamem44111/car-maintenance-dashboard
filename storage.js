@@ -791,6 +791,62 @@ const Storage = {
     // ── Tyre age ──
     // Rubber hardens with heat and time regardless of tread depth, which matters
     // more here than tread wear does.
+    // Tyres get their own logic rather than joining the generic schedule, because
+    // they are judged three ways at once: distance on the set, age of the rubber
+    // (which hardens in heat regardless of tread), and the tread itself. Keeping
+    // one authority here avoids the two-sources-of-truth problem — a logged
+    // "Tires" service and the tyre record are merged, latest wins.
+    TYRE_KM_LIFE: 50000,
+    TYRE_AGE_REPLACE: 6,
+    TYRE_AGE_WARN: 5,
+
+    getTyreStatus(car) {
+        if (!car) return null;
+        const rec = car.tires || {};
+        const svc = this.getServices(car.id)
+            .filter(s => s.type === 'Tires' && s.date)
+            .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
+
+        let fittedDate = rec.installedDate || null;
+        let fittedKm = parseInt(rec.installedMileage) || 0;
+        // A logged replacement is newer than whatever the tyre record says
+        if (svc && (!fittedDate || new Date(svc.date) > new Date(fittedDate))) {
+            fittedDate = svc.date;
+            fittedKm = parseInt(svc.mileage) || fittedKm;
+        }
+
+        const age = this.getTyreAge(car);
+        if (!fittedDate && !fittedKm && !age) return null;
+
+        const climate = (typeof Features !== 'undefined') ? Features.getClimateMultiplier() : 1;
+        const kmLife = Math.round(this.TYRE_KM_LIFE * climate);
+        const currentKm = this.getEffectiveMileage(car);
+        const kmOnSet = fittedKm > 0 ? Math.max(0, currentKm - fittedKm) : null;
+        const kmLeft = kmOnSet === null ? null : kmLife - kmOnSet;
+
+        // whichever runs out first, distance or rubber age
+        let status = 'ok', reason = null;
+        if (kmLeft !== null && kmLeft <= 0) { status = 'replace'; reason = 'km'; }
+        else if (age && age.status === 'replace') { status = 'replace'; reason = 'age'; }
+        else if (kmLeft !== null && kmLeft <= kmLife * 0.15) { status = 'soon'; reason = 'km'; }
+        else if (age && age.status === 'ageing') { status = 'soon'; reason = 'age'; }
+
+        const T = (str, vars) => (typeof I18N !== 'undefined' ? I18N.t(str, vars) : str);
+        let detail;
+        if (reason === 'age') detail = T('{y} years old', { y: age.years });
+        else if (kmOnSet !== null) {
+            detail = kmLeft <= 0 ? T('{km} km past the usual life', { km: Math.abs(kmLeft).toLocaleString() })
+                                 : T('{km} km on this set', { km: kmOnSet.toLocaleString() });
+        } else detail = age ? T('{y} years old', { y: age.years }) : '';
+
+        // how long the remaining distance actually lasts at this car's rate
+        const rate = this.getDailyKmRate(car.id);
+        const daysLeft = (kmLeft !== null && kmLeft > 0 && rate > 0) ? Math.round(kmLeft / rate) : null;
+
+        return { status, reason, detail, kmOnSet, kmLeft, kmLife, daysLeft, fittedDate, fittedKm,
+                 ageYears: age ? age.years : null, brand: rec.brand || '', size: rec.size || '' };
+    },
+
     getTyreAge(car) {
         const t = car && car.tires;
         const made = t && (t.manufactureDate || '');

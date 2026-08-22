@@ -830,14 +830,28 @@ const Features = {
             // Fuel anomaly
             const anomaly = Storage.getFuelAnomaly(c.id);
             if (anomaly) items.push({ priority: 1, icon: 'fuel', title: t('Fuel use up {p}%', {p: anomaly.pct}), sub: `${name} · ${anomaly.latest} vs ${anomaly.avg} L/100km avg — check tire pressure & air filter`, action: null });
-            // Tyre age — rubber degrades with heat and time, not just tread wear
-            const tyre = Storage.getTyreAge(c);
+            // Tyres — judged on distance covered and on rubber age, whichever runs
+            // out first. At high annual mileage distance almost always binds first.
+            const tyre = Storage.getTyreStatus(c);
             if (tyre && tyre.status !== 'ok') {
+                const why = tyre.reason === 'age'
+                    ? t('rubber hardens with age regardless of tread')
+                    : t('tread wears with distance');
                 items.push({
                     priority: tyre.status === 'replace' ? 0 : 1,
                     icon: 'shield',
-                    title: tyre.status === 'replace' ? t('Tyres are {y} years old — replace', {y: tyre.years}) : t('Tyres are {y} years old', {y: tyre.years}),
-                    sub: `${name} · ${tyre.madeOn} · ${t('rubber hardens with age regardless of tread')}`,
+                    title: tyre.status === 'replace' ? t('Tyres need replacing') : t('Tyres are near the end of their life'),
+                    sub: `${name} · ${tyre.detail}${tyre.daysLeft !== null ? ' · ' + t('about {d} days at your rate', {d: tyre.daysLeft}) : ''} · ${why}`,
+                    action: { label: t('Log'), fn: `App.openServiceModal(null,'${c.id}','Tires')` }
+                });
+            }
+            // No tyre information at all is itself worth saying on a car doing this
+            // kind of distance — tyres are the main safety item at highway speed.
+            if (!tyre) {
+                items.push({
+                    priority: 2, icon: 'shield',
+                    title: t('No tyre record'),
+                    sub: `${name} · ${t('add when they were fitted so wear and age can be tracked')}`,
                     action: { label: t('Tyres'), fn: `Features.openTireModal('${c.id}')` }
                 });
             }

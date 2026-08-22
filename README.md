@@ -75,6 +75,15 @@ the front/rear split but is no longer offered for new ones, since a fresh one na
 axle and neither axle's schedule can see it. A due type therefore has two checkboxes,
 which is why the save path de-duplicates before filing.
 
+**Tyres are judged separately from the schedule.** `Storage.getTyreStatus` is the single
+authority, because tyres run out three ways at once — distance on the set, age of the
+rubber (which hardens in heat whatever the tread looks like), and tread itself. It merges
+the tyre record on the car with any logged `Tires` service and takes whichever is newer,
+so there is only ever one answer. `Tires` is therefore a **log-only** type: putting it in
+the generic schedule would have created a second, conflicting verdict. At this owner's
+annual distance the km side almost always binds first — a 50,000 km life becomes 40,000
+under the severe-climate multiplier, which is barely twelve months of his driving.
+
 **Fuel is estimated, not logged.** Tank-by-tank logging never happened in a year of real
 use, and fuel is ~90% of this car's running cost, so cost-per-km was understating reality
 by 10x. `Features.getFuelEstimateFor` derives it from one setting instead — either
@@ -161,7 +170,7 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
   guard — only the odometer modal does.
 - A second, smaller instance: a service on 2026-08-18 reads 428,641 km, a manual reading
   on 2026-08-19 reads 428,640.
-- Not set: market value and tyre DOT date. Each disables a feature.
+- Tyre DOT date not set, and no tyre fitting record, so wear and age tracking are idle.
 - Fuel logging unused after a year. Cost-per-km now uses an estimate instead (11 L/100km
   at 2.33 SAR), but the tank-by-tank page and the consumption anomaly warning stay dormant.
 

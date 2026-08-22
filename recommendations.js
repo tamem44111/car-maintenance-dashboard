@@ -190,7 +190,7 @@ const Recommendations = {
     // entry is kept so records made before the front/rear split still work.
     // Alignment sat in ALL_TYPES for a long time with no interval defined anywhere,
     // so it could never produce a status. This is where it always belonged.
-    LOG_ONLY_TYPES: ['Periodic Inspection', 'Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid', 'Brake Pads', 'Suspension', 'Wheel Bearing', 'Alignment'],
+    LOG_ONLY_TYPES: ['Periodic Inspection', 'Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid', 'Brake Pads', 'Suspension', 'Wheel Bearing', 'Alignment', 'Tires'],
 
     // Kept working for old records, but no longer offered for new ones: a fresh
     // "Brake Pads" entry names no axle, so neither the front nor the rear schedule
@@ -207,7 +207,7 @@ const Recommendations = {
         ['Routine',               ['Oil Change', 'Tire Rotation', 'Air Filter', 'Cabin Air Filter']],
         ['Brakes',                ['Brake Inspection', 'Front Brake Pads', 'Rear Brake Pads', 'Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid']],
         ['Engine & drivetrain',   ['Transmission', 'Spark Plugs', 'Coolant Flush', 'Timing Belt']],
-        ['Steering & suspension', ['Alignment', 'Suspension', 'Wheel Bearing']],
+        ['Steering & suspension', ['Tires', 'Alignment', 'Suspension', 'Wheel Bearing']],
         ['Electrical & climate',  ['Battery', 'AC Service']],
         ['Other',                 ['Periodic Inspection', 'Other']]
     ],
