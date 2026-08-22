@@ -178,7 +178,7 @@ const App = {
     // carried over from last time with today's date and the current odometer.
     openRepeatPicker() {
         const cars = Storage.getCars();
-        if (!cars.length) return alert('Please add a car first.');
+        if (!cars.length) return alert(t('Please add a car first.'));
         const cid = this.selectedCarId !== 'all' ? this.selectedCarId : cars[0].id;
         const seen = {};
         Storage.getServices(cid)
@@ -217,7 +217,7 @@ const App = {
     // ── Service Modal ──
     openServiceModal(service = null, presetCarId = null, presetType = null) {
         const cars = Storage.getCars();
-        if (!cars.length) return alert('Please add a car first.');
+        if (!cars.length) return alert(t('Please add a car first.'));
         const types = Recommendations.logTypes();
         const isEdit = !!service;
         const isOil = service && service.type === 'Oil Change';
@@ -227,22 +227,22 @@ const App = {
         const selCar = service ? service.carId
             : (presetCarId || (this.selectedCarId !== 'all' ? this.selectedCarId : (cars[0] && cars[0].id)) || '');
         const html = `
-            <div class="form-group"><label>Car</label><select id="f-car" onchange="App._syncServiceMileage()">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
-            <div class="form-group"><label>${isEdit?'Service Type':'Services Performed (select all that apply)'}</label>
+            <div class="form-group"><label>${t('Car')}</label><select id="f-car" onchange="App._syncServiceMileage()">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
+            <div class="form-group"><label>${t(isEdit?'Service Type':'Services Performed (select all that apply)')}</label>
                 ${isEdit?`<select id="f-type" onchange="App._toggleServiceExtras()">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select>`:`<div class="svc-picker">${chips}</div>`}
             </div>
             <div id="oil-options" style="display:${isOil||presetType==='Oil Change'?'block':'none'}">
-                <div class="form-group"><label>Oil Type (next change interval)</label>
+                <div class="form-group"><label>${t('Oil Type (next change interval)')}</label>
                     <div class="oil-interval-group">
-                        <label class="oil-option"><input type="radio" name="oil-interval" value="5000" ${!service||!service.oilInterval||service.oilInterval==='5000'?'checked':''}><span class="oil-option-card"><strong>5,000 km</strong><small>Regular</small></span></label>
-                        <label class="oil-option"><input type="radio" name="oil-interval" value="7000" ${service&&service.oilInterval==='7000'?'checked':''}><span class="oil-option-card"><strong>7,000 km</strong><small>Semi-synthetic</small></span></label>
-                        <label class="oil-option"><input type="radio" name="oil-interval" value="10000" ${service&&service.oilInterval==='10000'?'checked':''}><span class="oil-option-card"><strong>10,000 km</strong><small>Full synthetic</small></span></label>
+                        <label class="oil-option"><input type="radio" name="oil-interval" value="5000" ${!service||!service.oilInterval||service.oilInterval==='5000'?'checked':''}><span class="oil-option-card"><strong>5,000 km</strong><small>${t('Regular')}</small></span></label>
+                        <label class="oil-option"><input type="radio" name="oil-interval" value="7000" ${service&&service.oilInterval==='7000'?'checked':''}><span class="oil-option-card"><strong>7,000 km</strong><small>${t('Semi-synthetic')}</small></span></label>
+                        <label class="oil-option"><input type="radio" name="oil-interval" value="10000" ${service&&service.oilInterval==='10000'?'checked':''}><span class="oil-option-card"><strong>10,000 km</strong><small>${t('Full synthetic')}</small></span></label>
                     </div>
                 </div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}" onchange="App._toggleServiceExtras()"></div>
-                <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
+                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}" onchange="App._toggleServiceExtras()"></div>
+                <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
             <div id="inspection-options" style="display:none">
                 <div class="form-row">
@@ -261,14 +261,14 @@ const App = {
                 <div class="derived" id="f-insp-derived"></div>
             </div>
             <div id="brake-options" style="display:none">
-                <div class="form-group"><label>Brake Pad Thickness (mm)</label><input type="number" id="f-pad" step="0.5" placeholder="e.g. 7" value="${service&&service.padThickness?service.padThickness:''}"><small class="field-note">New pads are about 10–12 mm; replace at 3 mm. Logging this predicts wear far better than a fixed interval.</small></div>
+                <div class="form-group"><label>${t('Brake Pad Thickness (mm)')}</label><input type="number" id="f-pad" step="0.5" placeholder="${t('e.g. 7')}" value="${service&&service.padThickness?service.padThickness:''}"><small class="field-note">${t('New pads are about 10-12 mm; replace at 3 mm. Logging this predicts wear far better than a fixed interval.')}</small></div>
             </div>
-            <div class="form-group"><label>Mileage at Service (km)</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{})||'':'')}"><small id="smileage-note" class="field-note"></small></div>
+            <div class="form-group"><label>${t('Mileage at Service (km)')}</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{})||'':'')}"><small id="smileage-note" class="field-note"></small></div>
             ${Features.renderBillsEditor(service?service.bills:[])}
-            <div class="form-group"><label>Notes</label><textarea id="f-notes" rows="2" placeholder="Optional...">${service?service.notes||'':''}</textarea></div>`;
+            <div class="form-group"><label>${t('Notes')}</label><textarea id="f-notes" rows="2" placeholder="${t('Optional...')}">${service?service.notes||'':''}</textarea></div>`;
         this.openModal(isEdit?'Edit Service':'Add Service', html, () => {
             const carId=document.getElementById('f-car').value, date=document.getElementById('f-date').value, cost=document.getElementById('f-cost').value, mileage=document.getElementById('f-smileage').value, notes=document.getElementById('f-notes').value.trim();
-            if(!date) return alert('Please select a date.');
+            if(!date) return alert(t('Please select a date.'));
             const car = Storage.getCars().find(c=>c.id===carId);
             const bills = Features.collectBills(mileage);
             const padEl=document.getElementById('f-pad');
@@ -295,7 +295,7 @@ const App = {
                 // A due type appears twice — in the pinned row and in its group — so the
                 // same job would otherwise be filed twice.
                 const selected=[...new Set([...document.querySelectorAll('.service-chips input:checked')].map(cb=>cb.value))];
-                if(!selected.length) return alert('Select at least one service.');
+                if(!selected.length) return alert(t('Select at least one service.'));
                 // With bills the total is already itemised, so it attaches to the first
                 // service only — splitting it again would double-count. Without bills the
                 // typed cost is shared evenly across the selected services as before.
@@ -454,9 +454,9 @@ const App = {
         const proj = Storage.getProjectedMileage(car);
         if (!keepExisting) field.value = proj.km || '';
         if (!note) return;
-        if (!proj.km) note.textContent = 'No odometer reading yet — type the reading from the dashboard.';
-        else if (proj.estimated) note.textContent = `Estimated from ${proj.lastKm.toLocaleString()} km on ${proj.lastDate} — edit if you know the exact reading.`;
-        else note.textContent = 'Your latest confirmed odometer reading — edit if needed.';
+        if (!proj.km) note.textContent = t('No odometer reading yet - type the reading from the dashboard.');
+        else if (proj.estimated) note.textContent = t('Estimated from {km} km on {d} - edit if you know the exact reading.', {km: proj.lastKm.toLocaleString(), d: proj.lastDate});
+        else note.textContent = t('Your latest confirmed odometer reading - edit if needed.');
     },
 
     _handleOilReminder(data) {
@@ -474,18 +474,18 @@ const App = {
     // ── Fuel Modal ──
     openFuelModal(log = null) {
         const cars = Storage.getCars();
-        if (!cars.length) return alert('Please add a car first.');
+        if (!cars.length) return alert(t('Please add a car first.'));
         const html = `
-            <div class="form-group"><label>Car</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${log&&log.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
+            <div class="form-group"><label>${t('Car')}</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${log&&log.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-row">
-                <div class="form-group"><label>Date</label><input type="date" id="f-date" value="${log?log.date:new Date().toISOString().split('T')[0]}"></div>
+                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" value="${log?log.date:new Date().toISOString().split('T')[0]}"></div>
                 <div class="form-group"><label>Odometer (km)</label><input type="number" id="f-odo" placeholder="50000" value="${log?log.odometer:''}"></div>
             </div>
             <div class="form-row">
                 <div class="form-group"><label>Liters</label><input type="number" id="f-liters" placeholder="45" step="0.1" value="${log?log.liters:''}"></div>
                 <div class="form-group"><label>Price/Liter (SAR)</label><input type="number" id="f-ppl" placeholder="2.18" step="0.01" value="${log?log.pricePerLiter:''}"></div>
             </div>
-            <div class="form-group"><label>Total Cost (SAR)</label><input type="number" id="f-ftotal" placeholder="Auto-calculated" step="0.01" value="${log?log.totalCost:''}"></div>
+            <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-ftotal" placeholder="Auto-calculated" step="0.01" value="${log?log.totalCost:''}"></div>
             <div class="form-group"><label>Station</label><input type="text" id="f-station" placeholder="Optional" value="${log?log.station||'':''}"></div>`;
         this.openModal(log?'Edit Fuel Log':'Add Fuel Log', html, () => {
             const liters=parseFloat(document.getElementById('f-liters').value)||0;
@@ -508,10 +508,10 @@ const App = {
     // ── Reminder Modal ──
     openReminderModal(reminder = null) {
         const cars = Storage.getCars();
-        if (!cars.length) return alert('Please add a car first.');
+        if (!cars.length) return alert(t('Please add a car first.'));
         const types = ['Oil Change','Tire Rotation','Brake Inspection','Air Filter','Registration Renewal','Insurance Renewal','Inspection','Other'];
         const html = `
-            <div class="form-group"><label>Car</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${reminder&&reminder.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
+            <div class="form-group"><label>${t('Car')}</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${reminder&&reminder.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-group"><label>Reminder For</label><select id="f-type">${types.map(t=>`<option value="${t}" ${reminder&&reminder.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select></div>
             <div class="form-row">
                 <div class="form-group"><label>Due Date</label><input type="date" id="f-duedate" value="${reminder?reminder.dueDate:''}"></div>

@@ -292,6 +292,27 @@ const Checks = {
             }
         }
         this.warn('English text still showing in Arabic', [...new Set(untranslated)]);
+
+        // The Add Service modal is the densest form in the app; sweep inside it too,
+        // since the page-level walk never opens it.
+        const modalGaps = [];
+        [['add service', () => App.openServiceModal()],
+         ['add fuel', () => App.openFuelModal()],
+         ['add reminder', () => App.openReminderModal()]].forEach(([name, open]) => {
+            open();
+            D.querySelectorAll('#modal label, #modal small, #modal .bills-title').forEach(el => {
+                const txt = (el.textContent || '').trim();
+                if (!txt || /[؀-ۿ]/.test(txt) || allow.test(txt)) return;
+                modalGaps.push(`${name}: ${txt.slice(0, 45)}`);
+            });
+            D.querySelectorAll('#modal [placeholder]').forEach(el => {
+                const txt = el.getAttribute('placeholder').trim();
+                if (!txt || /[؀-ۿ]/.test(txt) || allow.test(txt)) return;
+                modalGaps.push(`${name} [placeholder]: ${txt.slice(0, 45)}`);
+            });
+            App.closeModal();
+        });
+        this.warn('English text still showing in Arabic — inside modals', [...new Set(modalGaps)]);
         I18N.set('en'); I18N.translateDOM(); App.navigate('dashboard');
     },
 

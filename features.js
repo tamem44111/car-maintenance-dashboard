@@ -174,14 +174,14 @@ const Features = {
         return `<div class="bill-row" data-photos="${pids.join(',')}">
             <div class="bill-line bill-line-1">
                 <select class="bill-kind">${this.BILL_KINDS.map(k => `<option value="${k}" ${b.kind === k ? 'selected' : ''}>${I18N.t(k)}</option>`).join('')}</select>
-                <input type="text" class="bill-label" placeholder="What is it for? e.g. Spark plugs" value="${(b.label || '').replace(/"/g, '&quot;')}">
+                <input type="text" class="bill-label" placeholder="${t('What is it for? e.g. Spark plugs')}" value="${(b.label || '').replace(/"/g, '&quot;')}">
                 <input type="number" class="bill-amount" placeholder="0" step="0.01" value="${b.amount || ''}" oninput="Features.recalcBillTotal()">
-                <button type="button" class="bill-del" title="Remove this bill" onclick="Features.removeBillRow(this)">&times;</button>
+                <button type="button" class="bill-del" title="${t('Remove this bill')}" onclick="Features.removeBillRow(this)">&times;</button>
             </div>
             <div class="bill-line bill-line-2">
-                <input type="text" class="bill-vendor" placeholder="Shop / store name" value="${(b.vendor || '').replace(/"/g, '&quot;')}">
-                <input type="number" class="bill-wmonths" placeholder="Warranty months" value="${b.warrantyMonths || ''}">
-                <input type="number" class="bill-wkm" placeholder="Warranty km" value="${b.warrantyKm || ''}">
+                <input type="text" class="bill-vendor" placeholder="${t('Shop / store name')}" value="${(b.vendor || '').replace(/"/g, '&quot;')}">
+                <input type="number" class="bill-wmonths" placeholder="${t('Warranty months')}" value="${b.warrantyMonths || ''}">
+                <input type="number" class="bill-wkm" placeholder="${t('Warranty km')}" value="${b.warrantyKm || ''}">
             </div>
             <div class="bill-line bill-line-3">
                 <input type="file" id="${rid}" accept="image/*" multiple style="display:none" onchange="Features.pickBillPhoto(this)">
@@ -363,7 +363,7 @@ const Features = {
     // ── Odometer Update ──
     openOdometerModal(carId = null) {
         const cars = Storage.getCars();
-        if (!cars.length) return alert('Please add a car first.');
+        if (!cars.length) return alert(t('Please add a car first.'));
         const target = carId || cars[0].id;
 
         const panel = (cid) => {
