@@ -146,6 +146,41 @@ const Checks = {
         const notDupe = Storage.findDuplicateService({ carId: 'test-car', type: 'Oil Change', date: day(31), mileage: '96700' });
         this.ok('a different date is not a duplicate', !notDupe);
 
+        // -- "no record" must never be dressed up as a status --
+        // The fixture logs Oil Change and Air Filter only, so everything else is unknown.
+        const unknowns = Recommendations.unknownTypes(car);
+        this.ok('types with no record are reported unknown', unknowns.length > 0, JSON.stringify(unknowns));
+        this.ok('a logged type is not unknown', !unknowns.includes('Oil Change'));
+        const un = Recommendations.getMaintenanceStatus(car, unknowns[0]);
+        this.eq('an unknown item invents no due date', un.dueDate, null);
+        this.eq('an unknown item invents no next mileage', un.nextKm, null);
+        this.eq('an unknown item claims no distance remaining', un.kmRemaining, null);
+        this.eq('an unknown item is not counted as used', un.usedPct, 0);
+
+        // The score must not be propped up by items nobody has ever recorded.
+        const health = Storage.getCarHealthScore(car);
+        this.ok('unknown items are excluded from the score', health.unknownItems > 0);
+        // totalItems is the scheduled items that are known, plus insurance and
+        // registration, which are scored separately from the maintenance schedule.
+        const docsScored = (car.insuranceExpiry ? 1 : 0) + (car.registrationExpiry ? 1 : 0);
+        this.eq('the score counts only what is known',
+            health.totalItems,
+            Object.keys(Recommendations.getAllForCar(car)).length - health.unknownItems + docsScored);
+        this.ok('the score says how much it is based on', health.totalItems > 0 && health.unknownItems > 0);
+
+        // Backfilling a date must teach the schedule without touching the odometer:
+        // a remembered date paired with a guessed reading would wreck the km/day rate.
+        const rateBefore2 = Storage.getDailyKmRate('test-car');
+        const target = unknowns[0];
+        Storage.addService({ carId: 'test-car', type: target, date: day(120), cost: '', mileage: '',
+            notes: 'Recorded from memory, before logging started', backfilled: true });
+        this.near('a date-only backfill leaves the driving rate untouched',
+            Storage.getDailyKmRate('test-car'), rateBefore2, 0.001);
+        const after = Recommendations.getMaintenanceStatus(Storage.getCars()[0], target);
+        this.ok('a backfilled item stops being unknown', after.status !== 'unknown', after.status);
+        this.eq('a backfilled item now has a due date', typeof after.dueDate, 'string');
+        this.seed(A.W);
+
         // -- the picker's grouping must stay in step with the type lists --
         const grouped = Recommendations.GROUPS.flatMap(g => g[1]);
         const dupes = grouped.filter((t, i) => grouped.indexOf(t) !== i);
@@ -168,6 +203,7 @@ const Checks = {
         const due = Recommendations.dueTypes(car);
         this.ok('the due row finds the overdue air filter', due.some(d => d.type === 'Air Filter'), JSON.stringify(due.map(d => d.type)));
         this.eq('nothing healthy reaches the due row', due.filter(d => d.status === 'ok'), []);
+        this.eq('nothing unknown reaches the due row', due.filter(d => d.status === 'unknown'), []);
         this.ok('the due row puts overdue before due-soon',
             due.every((d, i) => i === 0 || !(d.status === 'overdue' && due[i - 1].status === 'soon')));
 

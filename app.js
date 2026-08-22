@@ -578,12 +578,13 @@ const App = {
             healthEl.innerHTML=cars.map(c=>{
                 const h=Storage.getCarHealthScore(c);
                 const circ=2*Math.PI*28;
-                const offset=circ-(h.score/100)*circ;
+                // A null score means nothing is known well enough to score
+                const offset=circ-((h.score===null?0:h.score)/100)*circ;
                 const svcCount=Storage.getServices(c.id).length;
                 const overdueC=Storage.getUpcomingReminders(c.id).filter(r=>new Date(r.dueDate)<new Date()).length;
                 return `<div class="health-card">
-                    <div class="health-ring"><svg width="70" height="70" viewBox="0 0 64 64"><circle class="health-ring-bg" cx="32" cy="32" r="28"/><circle class="health-ring-fg ${h.color}" cx="32" cy="32" r="28" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"/></svg><div class="health-score">${h.score}</div></div>
-                    <div class="health-info"><div class="health-car-name">${c.make} ${c.model}</div><div class="health-car-year"><bdi>${c.year}</bdi> &middot; <bdi>${(()=>{const p=Storage.getProjectedMileage(c);return p.km?(p.estimated?'~':'')+p.km.toLocaleString()+' km':'-';})()}</bdi></div><span class="health-label ${h.color}">${t(h.label)}</span><div class="health-details">${t('{n} services',{n:svcCount})}${overdueC?` &middot; <span style="color:var(--red)">${t('{n} overdue',{n:overdueC})}</span>`:''}</div></div>
+                    <div class="health-ring"><svg width="70" height="70" viewBox="0 0 64 64"><circle class="health-ring-bg" cx="32" cy="32" r="28"/><circle class="health-ring-fg ${h.color}" cx="32" cy="32" r="28" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"/></svg><div class="health-score">${h.score===null?'—':h.score}</div></div>
+                    <div class="health-info"><div class="health-car-name">${c.make} ${c.model}</div><div class="health-car-year"><bdi>${c.year}</bdi> &middot; <bdi>${(()=>{const p=Storage.getProjectedMileage(c);return p.km?(p.estimated?'~':'')+p.km.toLocaleString()+' km':'-';})()}</bdi></div><span class="health-label ${h.color}">${t(h.label)}</span><div class="health-details">${h.unknownItems?t('scored on {a} of {b} items',{a:h.totalItems,b:h.totalItems+h.unknownItems})+' &middot; ':''}${t('{n} services',{n:svcCount})}${overdueC?` &middot; <span style="color:var(--red)">${t('{n} overdue',{n:overdueC})}</span>`:''}</div></div>
                 </div>`;
             }).join('');
         } else { healthEl.innerHTML=''; }
@@ -619,8 +620,8 @@ const App = {
                 recsHTML=`<div class="car-recs"><div class="car-recs-title">${t("Maintenance Schedule")}</div>${Object.keys(recs).map(type=>{
                     const st=Recommendations.getMaintenanceStatus(c,type);
                     if(!st) return '';
-                    const sClass=st.status==='overdue'?'red':st.status==='soon'?'orange':'green';
-                    const sLabel=t(st.status==='overdue'?'Overdue':st.status==='soon'?'Soon':'OK');
+                    const sClass=st.status==='overdue'?'red':st.status==='soon'?'orange':st.status==='unknown'?'blue':'green';
+                    const sLabel=t(st.status==='overdue'?'Overdue':st.status==='soon'?'Soon':st.status==='unknown'?'No record':'OK');
                     return `<div class="rec-row2">
                         <div class="rec-top"><span class="rec-type">${I18N.t(type)}</span><span class="badge badge-${sClass}">${sLabel}</span></div>
                         <div class="rec-progress"><div class="rec-progress-bar ${sClass}" style="width:${Math.min(100,st.usedPct)}%"></div></div>
@@ -684,7 +685,7 @@ const App = {
                 </div>`;
             }
             return `<div class="car-card">
-                <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}"><bdi>${h.score}%</bdi> ${t(h.label)}</span></div>
+                <div class="car-card-header"><div><div class="car-card-name">${c.make} ${c.model}</div><div class="car-card-year">${c.year}</div></div><span class="health-label ${h.color}">${h.score===null?'':`<bdi>${h.score}%</bdi> `}${t(h.label)}</span></div>
                 <div class="odo-block ${fresh.stale?'odo-stale':''}">
                     <div class="odo-block-main">
                         <div class="odo-block-label">${t('Odometer')}${proj.estimated?` <span class="odo-badge">${t('est.')}</span>`:''}</div>

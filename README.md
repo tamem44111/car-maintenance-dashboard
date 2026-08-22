@@ -54,6 +54,18 @@ inspection you attended: there the expiry is *suggested* a year out from the ser
 stays editable, so it never silently overwrites a date you typed. Centres come from
 `Features.INSPECTION_CENTRES` (Dammam, Khobar) — extend that array to add more.
 
+**No record is not the same as never done.** Most owners start logging partway through a
+car's life — this one began in August 2025, at 389,951 km. So `getMaintenanceStatus`
+returns `status: 'unknown'` with **null** due date, next mileage and km remaining rather
+than assuming "done today"; the health score drops those items from its denominator and
+reports what it was scored on; the forecast skips them, since there is no date to project
+from; and the Action Center raises **one** grouped nudge instead of one alarm per item.
+`Features.openBackfillModal` turns unknowns into knowns: one row per item, fill in what
+you remember. A blank row stays unknown, and the odometer field is optional and clearly
+marked — a remembered date paired with a guessed reading would corrupt the km/day rate.
+Expect the score to *fall* when someone backfills. That is correct: a real status is
+replacing a flattering guess.
+
 **The service picker is grouped, and grouping is display only.** `Recommendations.GROUPS`
 lays the picker out by system with what the car currently owes pinned on top
 (`dueTypes`). The strings inside it are data keys, so regrouping never touches stored
@@ -128,10 +140,6 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
   semi-synthetic; `getMaintenanceStatus` ignores `service.oilInterval` and uses the
   manufacturer 12,000 x 0.8 = 9,600. Reminders say next oil at 432,881 km, the dashboard
   says 435,481. Both are on screen.
-- **Never-logged services are reported as freshly done.** `getMaintenanceStatus` assumes
-  "done at current km, today" when it finds no record, so six of twelve items on the
-  owner's car show a full interval remaining and count as healthy in the score. A 429,000
-  km car reads 93/100; with no services at all it reads 100/100.
 - **A note-only record still resets a schedule.** The 2025-08-17 Transmission entry (no
   cost, note "Need to replace after 60000") is counted as a completed fluid change. The
   owner acts on this app, so this one matters most.

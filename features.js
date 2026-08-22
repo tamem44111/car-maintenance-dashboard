@@ -634,6 +634,55 @@ const Features = {
         box.innerHTML = '';
     },
 
+    // ── Backfill: telling the app what happened before you started logging ──
+    // Most owners start logging partway through a car's life, so a missing record
+    // usually means "not logged yet", not "never done". This turns those unknowns
+    // into knowns cheaply: one row per item, fill in what you remember, leave the
+    // rest blank. Nothing is invented — a blank row stays unknown.
+    openBackfillModal(carId) {
+        const car = Storage.getCars().find(c => c.id === carId);
+        if (!car) return;
+        const unknown = Recommendations.unknownTypes(car);
+        if (!unknown.length) return alert(t('Every scheduled service already has a record.'));
+
+        const html = `
+            <p class="doc-intro">${t('These have no record yet, so the schedule cannot judge them. Fill in whatever you remember — a rough date is far better than nothing. Leave a row blank to keep it unknown.')}</p>
+            <div class="backfill-list">${unknown.map(type => {
+                const id = 'bf-' + type.toLowerCase().replace(/\s+/g, '-');
+                return `<div class="backfill-row">
+                    <div class="backfill-name">${I18N.t(type)}</div>
+                    <div class="backfill-inputs">
+                        <input type="date" id="${id}-date" aria-label="${t('Date')}">
+                        <input type="number" id="${id}-km" placeholder="${t('km (optional)')}" aria-label="${t('Odometer (km)')}">
+                    </div>
+                </div>`;
+            }).join('')}</div>
+            <small class="field-note">${t('Only fill the odometer if you actually know it. A guessed reading would distort the driving-rate estimate everything else depends on.')}</small>`;
+
+        App.openModal(t('Fill in what you know'), html, () => {
+            let added = 0;
+            unknown.forEach(type => {
+                const id = 'bf-' + type.toLowerCase().replace(/\s+/g, '-');
+                const date = (document.getElementById(id + '-date') || {}).value || '';
+                const km = ((document.getElementById(id + '-km') || {}).value || '').trim();
+                if (!date && !km) return;                       // blank stays unknown
+                Storage.addService({
+                    carId, type,
+                    // A km with no date still needs one to sit on the timeline; use today's
+                    // only when the owner gave a reading, never to invent a service event.
+                    date: date || new Date().toISOString().split('T')[0],
+                    cost: '', mileage: km, bills: [],
+                    notes: 'Recorded from memory, before logging started',
+                    backfilled: true
+                });
+                added++;
+            });
+            App.closeModal();
+            App.renderPage(App.currentPage);
+            if (added) alert(t('{n} added. The schedule can judge these now.', { n: added }));
+        });
+    },
+
     // ── Service Insights ──
     // What the records already know but never said: how the interval you actually
     // achieve compares with the recommended one, and what that habit costs a year.
@@ -714,7 +763,7 @@ const Features = {
             // Maintenance schedule (whichever comes first)
             recTypes.forEach(type => {
                 const st = Recommendations.getMaintenanceStatus(c, type);
-                if (!st || st.status === 'ok') return;
+                if (!st || st.status === 'ok' || st.status === 'unknown') return;
                 items.push({
                     priority: st.status === 'overdue' ? 0 : 1,
                     icon: 'wrench',
@@ -723,6 +772,17 @@ const Features = {
                     action: { label: t('Log'), fn: `App.openServiceModal(null,'${c.id}','${type}')` }
                 });
             });
+            // Services with no record at all. One entry, not one per item — seven
+            // separate alarms would be noise, and none of them is actually overdue.
+            const unknown = Recommendations.unknownTypes(c);
+            if (unknown.length) {
+                items.push({
+                    priority: 2, icon: 'wrench',
+                    title: t('{n} services have no record', { n: unknown.length }),
+                    sub: `${name} · ${t('the schedule cannot judge these until it knows when they were last done')}`,
+                    action: { label: t('Fill in'), fn: `Features.openBackfillModal('${c.id}')` }
+                });
+            }
             // Documents
             if (c.insuranceExpiry) {
                 const d = Math.ceil((new Date(c.insuranceExpiry) - today) / 86400000);

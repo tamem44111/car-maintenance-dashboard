@@ -218,7 +218,7 @@ const Recommendations = {
         if (!car) return [];
         return this.ALL_TYPES
             .map(type => this.getMaintenanceStatus(car, type))
-            .filter(st => st && st.status !== 'ok')
+            .filter(st => st && st.status !== 'ok' && st.status !== 'unknown')
             .sort((a, b) => (a.status === b.status ? 0 : a.status === 'overdue' ? -1 : 1))
             .slice(0, limit);
     },
@@ -228,6 +228,15 @@ const Recommendations = {
     // The periodic technical inspection (Fahes) is date-driven, not mileage-driven,
     // so it carries no km interval — the certificate's own expiry date governs it.
     isInspectionType(t) { return t === 'Periodic Inspection'; },
+
+    // Scheduled items this car has no record for. Not overdue — just unknown.
+    unknownTypes(car) {
+        if (!car) return [];
+        return this.ALL_TYPES.filter(type => {
+            const st = this.getMaintenanceStatus(car, type);
+            return st && st.status === 'unknown';
+        });
+    },
 
     getAllForCar(car) {
         const result = {};
@@ -242,6 +251,7 @@ const Recommendations = {
     // Full due-status for a service, evaluating BOTH km and time — due on whichever comes first.
     // Returns null if no recommendation exists for this type.
     getMaintenanceStatus(car, type) {
+        const T = (s, v) => (typeof I18N !== 'undefined' ? I18N.t(s, v) : s);
         if (!this.appliesTo(car, type)) return null;
         const rec = this.getEffective(car, type);
         if (!rec || !rec.km) return null;
@@ -253,6 +263,20 @@ const Recommendations = {
         const last = services[0];
         const months = rec.months || 12;
         const today = new Date();
+
+        // No record is not the same as never done. Most owners start logging partway
+        // through a car's life, so the honest answer is "we do not know" — inventing a
+        // due date from an assumption would be a confident guess about a real car.
+        if (!last) {
+            return {
+                type, rec, status: 'unknown', binding: null,
+                detail: T('No record yet'),
+                kmRemaining: null, daysRemaining: null, usedPct: 0,
+                nextKm: null, nextDate: null, kmEtaDate: null, kmDaysRemaining: null,
+                dueDate: null, dueDays: null, rate: Storage.getDailyKmRate(car.id),
+                lastServiced: null
+            };
+        }
 
         // ── Distance dimension ──
         const lastKm = last ? (parseInt(last.mileage) || 0) : 0;
@@ -300,7 +324,6 @@ const Recommendations = {
             dueDays = kmDaysRemaining;
         }
 
-        const T = (s, v) => (typeof I18N !== 'undefined' ? I18N.t(s, v) : s);
         const fmtDays = d => d <= 0 ? T('{d} days overdue', {d: Math.abs(d)})
             : d <= 60 ? T('in {d} days', {d})
             : T('in {m} months', {m: Math.round(d / 30)});

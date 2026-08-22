@@ -548,7 +548,7 @@ const Storage = {
         cars.forEach(c => {
             recTypes.forEach(type => {
                 const st = Recommendations.getMaintenanceStatus(c, type);
-                if (!st) return;
+                if (!st || st.status === 'unknown') return;   // no record, so no date to forecast from
                 // include if overdue, or its next-due date falls within the horizon
                 if (st.status === 'overdue' || new Date(st.nextDate) <= horizon) {
                     seen.add(c.id + '|' + type);
@@ -855,12 +855,16 @@ const Storage = {
     getCarHealthScore(car) {
         const recs = Recommendations.getAllForCar(car);
         const reminders = this.getUpcomingReminders(car.id);
-        let totalItems = 0, healthyItems = 0;
+        let totalItems = 0, healthyItems = 0, unknownItems = 0;
 
-        // Each scheduled service evaluated on whichever-comes-first (km OR time)
+        // Each scheduled service evaluated on whichever-comes-first (km OR time).
+        // Items with no record are left out of the score altogether rather than
+        // counted as healthy — scoring a guess is how a 429,000 km car came to
+        // read 93/100 on services nobody had ever recorded.
         Object.keys(recs).forEach(type => {
             const st = Recommendations.getMaintenanceStatus(car, type);
             if (!st) return;
+            if (st.status === 'unknown') { unknownItems++; return; }
             totalItems++;
             if (st.status === 'ok') healthyItems++;
             else if (st.status === 'soon') healthyItems += 0.5;
@@ -886,10 +890,11 @@ const Storage = {
         const overdueCount = reminders.filter(r => new Date(r.dueDate) < new Date()).length;
         healthyItems = Math.max(0, healthyItems - overdueCount * 0.5);
 
-        if (totalItems === 0) return { score: 100, label: 'New', color: 'blue' };
+        if (totalItems === 0) return { score: null, label: 'Not enough records', color: 'blue', totalItems, unknownItems };
         const score = Math.round((healthyItems / totalItems) * 100);
-        if (score >= 80) return { score, label: 'Good', color: 'green' };
-        if (score >= 50) return { score, label: 'Fair', color: 'orange' };
-        return { score, label: 'Needs Attention', color: 'red' };
+        const base = { score, totalItems, unknownItems };
+        if (score >= 80) return { ...base, label: 'Good', color: 'green' };
+        if (score >= 50) return { ...base, label: 'Fair', color: 'orange' };
+        return { ...base, label: 'Needs Attention', color: 'red' };
     }
 };
