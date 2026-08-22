@@ -8,6 +8,27 @@ verification procedure, and the open items. This file is about *how* to work her
 Tamim, Saudi Arabia. Currency SAR. The app must work in Arabic (RTL) as well as English.
 He uses it on an **iPhone as an installed PWA** — that is the target, not desktop.
 
+His car: 2013 Ford Taurus, 3.5L V6, ~429,000 km, driven ~38,500 km a year on intercity
+trips. That is roughly triple a normal private car and more than 5x the longest interval
+in `recommendations.js`, so the manufacturer schedule ran out long ago. Highway distance
+is mild on brakes, transmission and oil, and severe on tyres, cooling and rubber — the
+single `autocare_climate` multiplier cannot express that, and currently shortens all
+fourteen intervals equally.
+
+## What this is for
+
+Three things at once, in this order:
+
+1. **His actual car.** He acts on what the app says — it drives real maintenance
+   decisions. A wrong number is a wrong decision about a car he depends on, so accuracy
+   outranks features, and *honest uncertainty outranks a confident guess*. If the app
+   does not know when something was last done, it must say so rather than assume.
+2. **Possibly a product later.** It is not built for other users yet, and does not need
+   to be. But avoid one-way doors — unsourced data, formats that cannot be migrated,
+   anything expensive to undo. Say so when you meet one instead of quietly choosing.
+3. **Something another engineer will read.** Tests and clear code count as output here,
+   not overhead.
+
 ## Rules learned the hard way
 
 **Findability is part of "done".** Three separate features were built correctly and then
@@ -35,13 +56,19 @@ right call to state plainly.
 
 ## Every change, without exception
 
-1. Parse-check all six scripts and confirm HTML tag balance (snippets in `README.md`).
-2. Render every page and every modal, catching exceptions.
-3. Overflow sweep at 402px — pages *and* modals.
-4. Untranslated sweep in Arabic.
-5. Take a screenshot and look at it.
-6. Bump `CACHE` in `sw.js`.
-7. Commit, push, then verify the live files actually changed with `curl`.
+1. **Open `checks.html` and press Run.** It automates what used to be five manual steps:
+   parsing, every page and every modal in both languages, the overflow sweep at 402px,
+   and the raw-`${...}` bug class. It runs the real app in a 402px iframe, and it
+   snapshots and restores `localStorage` so a run cannot eat his records.
+2. **Add a check for whatever you just fixed**, so it cannot come back. That is the
+   point of the suite; a fix with no check is half done.
+3. **Take a screenshot and look at it.** Green checks cannot tell you a feature is
+   impossible to find — and that failure has happened three times here.
+4. Bump `CACHE` in `sw.js`.
+5. Commit, push, then verify the live files actually changed with `curl`.
+
+Green is necessary, not sufficient. The suite reports *warnings* for known gaps tracked
+in README's open items — read them, do not let them become wallpaper.
 
 Local `localhost:8080` caches JS hard; edits will appear not to apply. Serve on a fresh port.
 

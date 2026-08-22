@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AutoCare — checks</title>
+<style>
+  :root { --bg:#f6f7f9; --card:#fff; --text:#1a1d23; --text2:#5a6270; --line:#e3e6ea;
+          --green:#16a34a; --red:#dc2626; --amber:#d97706; --blue:#4f46e5; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:24px; background:var(--bg); color:var(--text);
+         font:15px/1.55 -apple-system,BlinkMacSystemFont,'Segoe UI',Inter,sans-serif; }
+  .wrap { max-width:1180px; margin:0 auto; display:grid; grid-template-columns:1fr 404px; gap:24px; align-items:start; }
+  @media (max-width:1000px) { .wrap { grid-template-columns:1fr; } }
+  h1 { font-size:21px; margin:0 0 4px; }
+  .lede { color:var(--text2); margin:0 0 18px; max-width:60ch; }
+  .panel { background:var(--card); border:1px solid var(--line); border-radius:12px; padding:18px; }
+  button { font:600 15px inherit; padding:10px 20px; border-radius:9px; border:0;
+           background:var(--blue); color:#fff; cursor:pointer; }
+  button:disabled { opacity:.5; cursor:default; }
+  .summary { font-size:17px; padding:12px 14px; border-radius:9px; margin:16px 0; background:#eef2ff; }
+  .summary.pass { background:#ecfdf5; color:#065f46; }
+  .summary.fail { background:#fef2f2; color:#991b1b; }
+  h3 { font-size:14px; text-transform:uppercase; letter-spacing:.05em; color:var(--text2); margin:20px 0 8px; }
+  ul { margin:0; padding-left:20px; }
+  li { margin:3px 0; }
+  .fails li b { color:var(--red); }
+  .fails span { display:block; color:var(--text2); font:12px/1.5 ui-monospace,SFMono-Regular,Menlo,monospace;
+                white-space:pre-wrap; word-break:break-word; }
+  .wname { margin:14px 0 4px; font-weight:600; color:var(--amber); }
+  .warns li, .passes li { color:var(--text2); font-size:13px; }
+  .allgood { color:var(--green); font-weight:600; }
+  details { margin-top:18px; } summary { cursor:pointer; color:var(--text2); font-size:13px; }
+  .note { font-size:13px; color:var(--text2); border-left:3px solid var(--line); padding-left:12px; margin:14px 0; }
+  /* content-box so the border sits outside: the app must see exactly 402px */
+  iframe { box-sizing:content-box; width:402px; height:850px; border:1px solid var(--line);
+           border-radius:12px; background:#fff; }
+  .frame-label { font-size:12px; color:var(--text2); margin:0 0 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div>
+    <h1>AutoCare — checks</h1>
+    <p class="lede">The verification procedure from <code>CLAUDE.md</code>, run automatically against the real
+       app in a 402&nbsp;px frame. Failures are things that are broken; warnings are known gaps
+       tracked in README's open items.</p>
+
+    <div class="panel">
+      <button id="run">Run all checks</button>
+      <p class="note"><strong>Your records are safe.</strong> This page shares an origin with the live app,
+         so every run snapshots all of <code>localStorage</code> and restores it afterwards — including if a
+         check throws. Receipt photos in IndexedDB are never touched.</p>
+      <div id="log"></div>
+    </div>
+  </div>
+
+  <div>
+    <p class="frame-label">The app under test — 402&nbsp;px, iPhone width</p>
+    <iframe id="app" src="index.html" title="App under test"></iframe>
+  </div>
+</div>
+
+<script src="checks.js"></script>
+<script>
+  const btn = document.getElementById('run');
+  const frame = document.getElementById('app');
+  const log = document.getElementById('log');
+  btn.addEventListener('click', async () => {
+    btn.disabled = true;
+    btn.textContent = 'Running…';
+    try {
+      const r = await Checks.run(frame, log);
+      btn.textContent = r.failed ? `${r.failed} failing — run again` : 'All passing — run again';
+    } catch (e) {
+      log.innerHTML = '<div class="summary fail">The runner itself failed: ' + e.message + '</div>';
+      btn.textContent = 'Run all checks';
+    }
+    btn.disabled = false;
+  });
+</script>
+</body>
+</html>

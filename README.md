@@ -19,6 +19,7 @@ Bilingual (EN/AR) offline-first PWA for tracking car maintenance, built for Saud
 | `photos.js` | Receipt images: in-browser compression + IndexedDB |
 | `app.js` | Routing, rendering, all modals |
 | `sw.js` | Service worker. **Bump `CACHE` on every deploy** |
+| `checks.html` / `checks.js` | The verification suite. Open and press Run |
 
 Data lives in `localStorage` (`autocare_data`) except receipt photos, which are in IndexedDB.
 
@@ -67,40 +68,76 @@ printing uses a hidden iframe.
 
 ---
 
-## Verification procedure (do all of this before claiming something works)
+## Verification procedure
 
-Past failures came from checking return values instead of the screen. Run every step:
+**Open `checks.html` and press Run.** ~170 checks, a few seconds. It drives the real app
+inside a 402px iframe, so the render and overflow checks see what an iPhone sees.
 
-1. **Parse-check all scripts** — a syntax error in one file silently disables a whole object:
-   ```js
-   for (const f of ['i18n.js','photos.js','storage.js','recommendations.js','features.js','app.js']) {
-     const s = await (await fetch(f+'?v='+Date.now(),{cache:'no-store'})).text();
-     try { new Function(s); } catch(e) { console.log(f, e.message); }
-   }
-   ```
-2. **Check HTML tag balance** — `s.count('<div') === s.count('</div>')`.
-3. **Render every page and modal**, catching exceptions.
-4. **Overflow sweep at 402px** (iPhone) — no element may exceed the viewport.
-5. **Untranslated sweep in Arabic** — walk leaf nodes on every page, flag pure-Latin text.
-   Should return only SAR amounts and car names.
-6. **Look at a screenshot.** Confirm a person can *find* the feature, not just that the function works.
+What it covers:
 
-**Local cache trap:** `localhost:8080` aggressively caches JS, so edits appear not to apply. Serve on a
-fresh port to test, or unregister the SW and refetch with `{cache:'reload'}`.
+- Odometer projection, the driving rate, and that a lower reading cannot overwrite a higher one
+- Whichever-comes-first due logic, overdue detection, the climate multiplier
+- `certificateExpiry` / `inspectionDateFrom` being exact inverses
+- That a back-dated inspection record leaves the driving rate untouched
+- Trash round trip, duplicate detection, backups carrying settings
+- Every page and every modal rendering in **both** languages without throwing
+- No element exceeding 402px, pages *and* modals
+- **No raw `${...}` in the rendered DOM** — three of these once shipped, printing their
+  own source on the dashboard
+- Arabic sweep, reported as warnings rather than failures
 
----
+**It snapshots and restores all of `localStorage`, including when a check throws.** The
+page is served from the same origin as the live app, so without that a run would
+overwrite real records. Never remove that `finally` block. IndexedDB is never touched.
 
-## Open items (from the owner's real data, Aug 2026)
+Two things the suite cannot do, so you still must:
 
-- **Spark plugs ~500 km overdue** on the Ford Taurus.
-- **Odometer inconsistency:** Coolant Flush logged 2026-05-01 at 410,800 km, but Air Filter
-  2026-04-12 at 414,521 km — one is mistyped.
-- **Transmission record** (2025-08-17, no cost, note "Need to replace after 60000") is being counted as
-  a completed service. If the fluid was never changed, the schedule is wrong.
-- Not set: timing belt/chain type, market value, tyre DOT date. Each disables a feature until filled.
-- Fuel logging unused — consumption tracking and the anomaly warning are dormant.
+1. **Look at a screenshot.** Past failures here were features built correctly and shipped
+   invisible. A passing check says the function works, not that a person can find it.
+2. **Add a check for what you just fixed.** Otherwise the suite only knows about
+   yesterday's bugs.
 
----
+**Local cache trap:** `localhost:8080` aggressively caches JS, so edits appear not to
+apply — this has burned a session as recently as August 2026. Serve on a fresh port.
+
+## Open items
+
+**Verified in the code, August 2026 — none of these are fixed:**
+
+- **Two different oil intervals are live at once.** The owner picked 7,000 km
+  semi-synthetic; `getMaintenanceStatus` ignores `service.oilInterval` and uses the
+  manufacturer 12,000 x 0.8 = 9,600. Reminders say next oil at 432,881 km, the dashboard
+  says 435,481. Both are on screen.
+- **Never-logged services are reported as freshly done.** `getMaintenanceStatus` assumes
+  "done at current km, today" when it finds no record, so six of twelve items on the
+  owner's car show a full interval remaining and count as healthy in the score. A 429,000
+  km car reads 93/100; with no services at all it reads 100/100.
+- **A note-only record still resets a schedule.** The 2025-08-17 Transmission entry (no
+  cost, note "Need to replace after 60000") is counted as a completed fluid change. The
+  owner acts on this app, so this one matters most.
+- **Auto-reminder dates assume 40 km/day** (`App._estDate`) against a real rate of 105.
+- **`Alignment`** is in `ALL_TYPES` with no interval anywhere, so it can never produce a
+  status.
+- **Untranslated in Arabic:** `In {n}d` / `Today` (`app.js` upcoming-reminders card,
+  `storage.js:getReminderStatus`), `or at` and `confirm('Delete?')` in the reminder card,
+  `Still covered` / `Active` in the Warranty Center, the service-insight sentence on
+  Expenses, and most labels in the Add Service modal (Car, Date, Notes, oil type, brake
+  pad thickness).
+- **The schedule data has no provenance.** `recommendations.js` says "Ford Taurus owner
+  manual" but nothing records where those numbers came from. The app's entire value rests
+  on that table.
+
+**The owner's own data:**
+
+- Spark plugs ~600 km overdue and growing at 105 km/day.
+- Odometer inconsistency: Coolant Flush logged 2026-05-01 at 410,800 km, Air Filter
+  2026-04-12 at 414,521 km. One is mistyped. The service modal has no backwards-reading
+  guard — only the odometer modal does.
+- A second, smaller instance: a service on 2026-08-18 reads 428,641 km, a manual reading
+  on 2026-08-19 reads 428,640.
+- Not set: market value and tyre DOT date. Each disables a feature.
+- Fuel logging unused after a year, so consumption tracking and the anomaly warning are
+  dormant, and cost-per-km omits by far the largest running expense.
 
 ## Commercial assessment
 
