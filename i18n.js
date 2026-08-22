@@ -242,6 +242,16 @@ const I18N = {
             'Never backed up': 'لم يتم النسخ الاحتياطي أبداً',
             'Nothing deleted in the last 30 days.': 'لا يوجد محذوفات خلال آخر ٣٠ يوم.',
             'No receipt photos stored yet': 'لا توجد صور فواتير محفوظة',
+            'Backup shared ({mb} MB)': 'تم مشاركة النسخة الاحتياطية ({mb} ميجابايت)',
+            'Backup saved ({mb} MB)': 'تم حفظ النسخة الاحتياطية ({mb} ميجابايت)',
+            '{n} car(s)': '{n} سيارة',
+            '{n} service record(s)': '{n} سجل صيانة',
+            '{n} receipt photo(s)': '{n} صورة فاتورة',
+            '({n} could not be read)': '({n} تعذّرت قراءتها)',
+            'Settings and custom intervals included': 'الإعدادات والفترات المخصصة مضمّنة',
+            'Save it to Files or iCloud Drive so your history is not on this phone alone.': 'احفظها في الملفات أو iCloud Drive حتى لا يبقى سجلك على هذا الجهاز وحده.',
+            'Keep this file in Files or iCloud Drive.': 'احتفظ بهذا الملف في الملفات أو iCloud Drive.',
+            'Could not build the backup file.': 'تعذّر إنشاء ملف النسخة الاحتياطية.',
 
             // ── Insights ──
             'Service Insights': 'تحليل الصيانة',

@@ -57,28 +57,54 @@ const Features = {
                     photos
                 };
                 const json = JSON.stringify(payload, null, 2);
-                const blob = new Blob([json], { type: 'application/json' });
-                const url = URL.createObjectURL(blob);
-                const a = document.createElement('a');
-                a.href = url;
-                a.download = `autocare-backup-${new Date().toISOString().split('T')[0]}.json`;
-                a.click();
-                URL.revokeObjectURL(url);
-                Storage.markBackedUp();
-                if (App.currentPage === 'dashboard') App.renderPage('dashboard');
-
-                const n = Object.keys(photos).length;
-                const mb = (json.length / 1048576).toFixed(1);
-                alert(
-                    'Backup saved (' + mb + ' MB)\n\n' +
-                    data.cars.length + ' car(s)\n' +
-                    data.services.length + ' service record(s)\n' +
-                    n + ' receipt photo(s)' + (missing ? ' (' + missing + ' could not be read)' : '') + '\n' +
-                    'Settings and custom intervals included\n\n' +
-                    'Keep this file in Files or iCloud Drive.'
-                );
+                const name = `autocare-backup-${new Date().toISOString().split('T')[0]}.json`;
+                return this._deliverBackup(json, name).then(how => {
+                    // Backing out of the share sheet is a decision, not a backup
+                    if (!how) return;
+                    Storage.markBackedUp();
+                    if (App.currentPage === 'dashboard') App.renderPage('dashboard');
+                    const n = Object.keys(photos).length;
+                    const mb = (json.length / 1048576).toFixed(1);
+                    alert(
+                        t(how === 'share' ? 'Backup shared ({mb} MB)' : 'Backup saved ({mb} MB)', { mb }) + '\n\n' +
+                        t('{n} car(s)', { n: data.cars.length }) + '\n' +
+                        t('{n} service record(s)', { n: data.services.length }) + '\n' +
+                        t('{n} receipt photo(s)', { n }) +
+                        (missing ? ' ' + t('({n} could not be read)', { n: missing }) : '') + '\n' +
+                        t('Settings and custom intervals included') + '\n\n' +
+                        t(how === 'share'
+                            ? 'Save it to Files or iCloud Drive so your history is not on this phone alone.'
+                            : 'Keep this file in Files or iCloud Drive.')
+                    );
+                });
             })
-            .catch(() => alert('Could not build the backup file.'));
+            .catch(() => alert(t('Could not build the backup file.')));
+    },
+
+    // A download inside an installed iOS PWA lands somewhere the owner will never
+    // find again, which is how a backup ends up never being taken. The system share
+    // sheet reaches Files, iCloud Drive or a message to yourself in one tap, so try
+    // that first. Falls back to a download when sharing is unavailable, or when the
+    // tap's user activation has expired while the receipt photos were being read.
+    // Resolves to 'share' | 'download', or null if the owner cancelled.
+    _deliverBackup(json, name) {
+        const download = () => {
+            const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = name;
+            a.click();
+            // Revoking straight away cancels the download in some browsers
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+            return 'download';
+        };
+        let file = null;
+        try { file = new File([json], name, { type: 'application/json' }); } catch (e) { file = null; }
+        const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share);
+        if (!canShare) return Promise.resolve(download());
+        return navigator.share({ files: [file], title: 'AutoCare backup' })
+            .then(() => 'share')
+            .catch(err => (err && err.name === 'AbortError') ? null : download());
     },
 
     importData(file) {
