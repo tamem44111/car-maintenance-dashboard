@@ -63,6 +63,17 @@ the front/rear split but is no longer offered for new ones, since a fresh one na
 axle and neither axle's schedule can see it. A due type therefore has two checkboxes,
 which is why the save path de-duplicates before filing.
 
+**Fuel is estimated, not logged.** Tank-by-tank logging never happened in a year of real
+use, and fuel is ~90% of this car's running cost, so cost-per-km was understating reality
+by 10x. `Features.getFuelEstimateFor` derives it from one setting instead — either
+L/100km plus a pump price, or a single monthly spend figure — and the Settings panel shows
+what the numbers work out to in SAR/year *and* L/100km, so a mistyped figure is visible
+rather than silently distorting every cost in the app. Estimated fuel is always labelled
+`Fuel (est.)` and shown beside the maintenance figure, never merged into one number:
+maintenance-per-km is the one that rises as a car degrades, so it has to stay visible.
+The setting is in `SETTING_KEYS`, so it survives a backup — leaving it out would repeat
+the climate-multiplier mistake.
+
 **Fuel is excluded from keep-or-sell.** You would pay it on any car, so it says nothing about whether
 *this* car is worth keeping. Only maintenance counts toward the verdict.
 
@@ -143,8 +154,8 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
 - A second, smaller instance: a service on 2026-08-18 reads 428,641 km, a manual reading
   on 2026-08-19 reads 428,640.
 - Not set: market value and tyre DOT date. Each disables a feature.
-- Fuel logging unused after a year, so consumption tracking and the anomaly warning are
-  dormant, and cost-per-km omits by far the largest running expense.
+- Fuel logging unused after a year. Cost-per-km now uses an estimate instead (11 L/100km
+  at 2.33 SAR), but the tank-by-tank page and the consumption anomaly warning stay dormant.
 
 ## Commercial assessment
 

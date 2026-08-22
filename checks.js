@@ -171,6 +171,45 @@ const Checks = {
         this.ok('the due row puts overdue before due-soon',
             due.every((d, i) => i === 0 || !(d.status === 'overdue' && due[i - 1].status === 'soon')));
 
+        // -- fuel estimate: three modes, and the two input styles must agree --
+        const span = Storage.getTrackedKm('test-car');
+        this.ok('tracked distance is the reading span', span > 0, String(span));
+        Features.saveFuelSettings({ mode: 'off' });
+        const off = Storage.getCostBreakdown('test-car');
+        this.eq('with fuel off, nothing is estimated', off.fuelEstimated, false);
+        this.eq('with fuel off, cost per km is maintenance only', +off.totalPerKm.toFixed(6), +off.maintPerKm.toFixed(6));
+
+        Features.saveFuelSettings({ mode: 'consumption', lp100: '11', price: '2.33' });
+        const cons = Storage.getCostBreakdown('test-car');
+        this.eq('consumption mode estimates fuel', cons.fuelEstimated, true);
+        this.near('fuel cost is litres x price', cons.fuel, span * 11 / 100 * 2.33, 0.01);
+        this.ok('fuel dwarfs maintenance at this mileage', cons.fuel > cons.maintenance);
+        this.near('the parts add up to the total', cons.maintPerKm + cons.fuelPerKm, cons.totalPerKm, 1e-9);
+
+        // The same real spend entered either way must land in the same place.
+        const monthlyEquivalent = (span * 11 / 100 * 2.33) / (span / this.RATE / 30.44);
+        Features.saveFuelSettings({ mode: 'monthly', monthly: String(monthlyEquivalent), price: '2.33' });
+        this.near('monthly spend agrees with consumption mode',
+            Storage.getCostBreakdown('test-car').fuel, cons.fuel, 1);
+
+        // A mistyped figure must be caught rather than silently distorting every cost
+        this.eq('an implausibly low consumption is flagged', Features.fuelSanity(2).ok, false);
+        this.eq('an implausibly high consumption is flagged', Features.fuelSanity(40).ok, false);
+        this.eq('a realistic consumption passes', Features.fuelSanity(11).ok, true);
+
+        // Keep-or-sell deliberately ignores fuel: you would pay it on any car
+        this.eq('keep-or-sell still excludes fuel', Storage.getOwnershipAnalysis('test-car').fuel12, 0);
+
+        // REGRESSION: the fuel setting must ride along in backups. Omitting the
+        // climate multiplier once lengthened every interval after a restore.
+        this.ok('the fuel setting is in SETTING_KEYS', !!Features.SETTING_KEYS.fuel);
+        const packed = Features.collectSettings();
+        this.eq('a backup payload carries the fuel setting', packed.fuel.mode, 'monthly');
+        Features.saveFuelSettings({ mode: 'off', lp100: '', monthly: '' });
+        Features.applySettings(packed);
+        this.eq('restoring a backup brings the fuel setting back', Features.getFuelSettings().mode, 'monthly');
+        Features.saveFuelSettings({ mode: 'off' });
+
         // -- REGRESSION: a backup must carry settings, or restoring it silently
         //    lengthens every interval by 25% --
         A.W.localStorage.setItem('autocare_climate', 'severe');

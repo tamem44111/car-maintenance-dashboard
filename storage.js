@@ -569,18 +569,40 @@ const Storage = {
     },
 
     // Total cost of ownership per km (lifetime spend / km driven since first record)
-    getCostPerKm(carId) {
-        const total = this.getTotalExpenses(carId);
+    // Distance covered by the records we hold, used as the divisor for every
+    // per-km figure. Null when there is not enough history to divide by.
+    getTrackedKm(carId) {
         const car = this.getCars().find(c => c.id === carId);
         if (!car) return null;
-        // Use every known reading — manual odometer entries included
         const readings = this.getOdometerReadings(carId).map(r => r.km).filter(m => m > 0);
-        if (readings.length < 1) return null;
-        const minKm = Math.min(...readings);
-        const maxKm = this.getEffectiveMileage(car);
-        const span = maxKm - minKm;
-        if (span <= 0) return null;
-        return total / span;
+        if (!readings.length) return null;
+        const span = this.getEffectiveMileage(car) - Math.min(...readings);
+        return span > 0 ? span : null;
+    },
+
+    // Running cost split into its parts. Fuel is almost always the larger half,
+    // and it is estimated rather than logged — see Features.getFuelEstimate —
+    // so the two are kept separate and labelled rather than silently summed.
+    getCostBreakdown(carId) {
+        const span = this.getTrackedKm(carId);
+        if (!span) return null;
+        const maintenance = this.getServiceExpenses(carId) + this.getFuelExpenses(carId);
+        const est = (typeof Features !== 'undefined') ? Features.getFuelEstimateFor(carId, span) : null;
+        const fuel = est ? est.cost : 0;
+        return {
+            km: span,
+            maintenance, fuel,
+            total: maintenance + fuel,
+            maintPerKm: maintenance / span,
+            fuelPerKm: fuel / span,
+            totalPerKm: (maintenance + fuel) / span,
+            fuelEstimated: !!est
+        };
+    },
+
+    getCostPerKm(carId) {
+        const b = this.getCostBreakdown(carId);
+        return b ? b.totalPerKm : null;
     },
 
     // Spend within a given YYYY-MM month

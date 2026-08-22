@@ -8,7 +8,7 @@ const Features = {
     // Everything that makes the app behave as configured must ride along: the
     // records, custom intervals, the settings that change how intervals are
     // calculated, and every receipt image (which lives in IndexedDB, not here).
-    SETTING_KEYS: { climate: 'autocare_climate', mechanics: 'autocare_mechanics', theme: 'autocare_theme', lang: 'autocare_lang' },
+    SETTING_KEYS: { climate: 'autocare_climate', mechanics: 'autocare_mechanics', theme: 'autocare_theme', lang: 'autocare_lang', fuel: 'autocare_fuel' },
 
     collectSettings() {
         const raw = k => localStorage.getItem(k);
@@ -16,7 +16,8 @@ const Features = {
             climate: raw(this.SETTING_KEYS.climate) || 'normal',
             mechanics: JSON.parse(raw(this.SETTING_KEYS.mechanics) || '[]'),
             theme: raw(this.SETTING_KEYS.theme) || 'light',
-            lang: raw(this.SETTING_KEYS.lang) || 'en'
+            lang: raw(this.SETTING_KEYS.lang) || 'en',
+            fuel: this.getFuelSettings()
         };
     },
 
@@ -30,6 +31,7 @@ const Features = {
             document.documentElement.setAttribute('data-theme', settings.theme);
             n++;
         }
+        if (settings.fuel) { localStorage.setItem(this.SETTING_KEYS.fuel, JSON.stringify(settings.fuel)); n++; }
         if (settings.lang && typeof I18N !== 'undefined') {
             I18N.set(settings.lang);
             I18N.translateDOM();
@@ -870,7 +872,7 @@ const Features = {
             tcoHTML = `<div class="card" style="flex:1">
                 <h3>${t("Running Cost (per km)")}</h3>
                 <div class="tco-list">${tcoCars.map(({ c, cpk }) =>
-                    `<div class="tco-row"><span class="tco-name">${c.make} ${c.model}</span><span class="tco-val">${cpk.toFixed(2)} <small>SAR/km</small></span></div>`).join('')}</div>
+                    `<div class="tco-row"><span class="tco-name">${c.make} ${c.model}</span><span class="tco-val">${cpk.toFixed(2)} <small>SAR/km</small></span></div>${Features.costSplitLine(c.id)}`).join('')}</div>
                 <div class="forecast-sub" style="margin-top:10px">${t("Total spend ÷ distance driven (fuel + maintenance)")}</div>
             </div>`;
         }
@@ -912,7 +914,7 @@ const Features = {
                 <div><span>Total Services</span><strong>${services.length}</strong></div>
                 <div><span>Maintenance Spend</span><strong>${svcTotal.toFixed(0)} SAR</strong></div>
                 <div><span>Fuel Spend</span><strong>${fuelTotal.toFixed(0)} SAR</strong></div>
-                ${cpk ? `<div><span>Running Cost</span><strong>${cpk.toFixed(2)} SAR/km</strong></div>` : ''}
+                ${cpk ? `<div><span>${t('Running Cost')}</span><strong>${cpk.toFixed(2)} SAR/km</strong></div>` : ''}
             </div>
             <table><thead><tr><th>Date</th><th>Service</th><th>Mileage</th><th>Cost</th><th>Bills / Notes</th></tr></thead>
             <tbody>${rows || '<tr><td colspan="5" style="text-align:center;color:#999;padding:20px">No services recorded</td></tr>'}</tbody></table>
@@ -1033,6 +1035,17 @@ const Features = {
                 <small style="color:var(--text3);display:block;margin-top:4px">Severe climate reduces recommended intervals by 20% (heat accelerates wear)</small>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
+                <label>${t("Fuel")}</label>
+                <select id="f-fuelmode" onchange="Features._paintFuelSetting()">
+                    <option value="off">${t('Not tracked')}</option>
+                    <option value="consumption">${t('Consumption and price')}</option>
+                    <option value="monthly">${t('Monthly spend')}</option>
+                </select>
+                <div id="fuel-fields" style="margin-top:10px"></div>
+                <div id="fuel-implied" class="derived" style="display:none;margin-top:10px"></div>
+                <small style="color:var(--text3);display:block;margin-top:6px">${t('Fuel is usually the largest running cost. Without it, cost per km counts only maintenance.')}</small>
+            </div>
+            <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>${t("Backup")}</label>
                 <div class="backup-status">${Features.backupStatusLine()}</div>
                 <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">
@@ -1069,9 +1082,20 @@ const Features = {
                     : 'No receipt photos stored yet';
             }).catch(() => { el.textContent = 'Could not read storage usage'; });
         }, 40);
+        setTimeout(() => {
+            const m = document.getElementById('f-fuelmode');
+            if (m) { m.value = Features.getFuelSettings().mode; Features._paintFuelSetting(); }
+        }, 20);
         App.openModal('Settings', html, () => {
             const cl = document.getElementById('f-climate').value;
             localStorage.setItem('autocare_climate', cl);
+            const val = id => { const el = document.getElementById(id); return el ? el.value.trim() : ''; };
+            Features.saveFuelSettings({
+                mode: val('f-fuelmode') || 'off',
+                lp100: val('f-fuellp100'),
+                price: val('f-fuelprice') || Features.FUEL_DEFAULTS.price,
+                monthly: val('f-fuelmonthly')
+            });
             const langEl = document.getElementById('f-lang');
             if (langEl && langEl.value !== I18N.lang) { I18N.set(langEl.value); I18N.translateDOM(); }
             Features.saveMechanics();
@@ -1190,6 +1214,123 @@ const Features = {
             if (name) mechs.push({ name, phone, specialty });
         });
         localStorage.setItem('autocare_mechanics', JSON.stringify(mechs));
+    },
+
+    // "Maintenance 0.03 · Fuel 0.26" under the headline figure. Fuel is an
+    // estimate, not a logged total, so it is always labelled as one.
+    costSplitLine(carId) {
+        const b = Storage.getCostBreakdown(carId);
+        if (!b || !b.fuelEstimated) return '';
+        return `<div class="cost-split">${t('Maintenance')} <b>${b.maintPerKm.toFixed(2)}</b>` +
+            ` &middot; ${t('Fuel (est.)')} <b>${b.fuelPerKm.toFixed(2)}</b>` +
+            ` &middot; ${t('Total')} <b>${b.totalPerKm.toFixed(2)}</b> ${t('SAR/km')}</div>`;
+    },
+
+    // ── Fuel estimate ──────────────────────────────────────────────────────
+    // Fuel is by far the largest running cost, and tank-by-tank logging never
+    // happens in practice. So it is estimated from one setting instead, in
+    // whichever form the owner can actually answer:
+    //   'consumption' — L/100km and price per litre, scales with distance driven
+    //   'monthly'     — one spend figure, divided across the period
+    //   'off'         — no estimate; cost-per-km stays maintenance only
+    // The setting is in SETTING_KEYS, so it rides along in backups. Leaving it
+    // out would understate every cost figure after a restore, exactly as
+    // omitting the climate multiplier once silently lengthened every interval.
+    FUEL_KEY: 'autocare_fuel',
+    FUEL_DEFAULTS: { mode: 'off', lp100: '', price: '2.33', monthly: '' },
+
+    getFuelSettings() {
+        try {
+            const raw = localStorage.getItem(this.FUEL_KEY);
+            return raw ? { ...this.FUEL_DEFAULTS, ...JSON.parse(raw) } : { ...this.FUEL_DEFAULTS };
+        } catch (e) { return { ...this.FUEL_DEFAULTS }; }
+    },
+
+    saveFuelSettings(next) {
+        localStorage.setItem(this.FUEL_KEY, JSON.stringify({ ...this.getFuelSettings(), ...next }));
+    },
+
+    // Estimated fuel cost over a given distance. Returns null when switched off
+    // or not configured, so callers can tell "no estimate" from "zero".
+    getFuelEstimateFor(carId, km) {
+        const f = this.getFuelSettings();
+        if (!km || km <= 0) return null;
+        if (f.mode === 'consumption') {
+            const lp100 = parseFloat(f.lp100), price = parseFloat(f.price);
+            if (!(lp100 > 0) || !(price > 0)) return null;
+            const litres = km * lp100 / 100;
+            return { cost: litres * price, litres, lp100, source: 'consumption' };
+        }
+        if (f.mode === 'monthly') {
+            const monthly = parseFloat(f.monthly);
+            if (!(monthly > 0)) return null;
+            const rate = Storage.getDailyKmRate(carId);
+            if (!rate || rate <= 0) return null;
+            const days = km / rate;
+            const cost = monthly * (days / 30.44);
+            const price = parseFloat(f.price) || 0;
+            // Work the consumption back out so a mistyped figure is visible
+            const litres = price > 0 ? cost / price : null;
+            return { cost, litres, lp100: litres ? litres / km * 100 : null, source: 'monthly' };
+        }
+        return null;
+    },
+
+    // A Taurus 3.5 outside this band means the number is probably wrong.
+    PLAUSIBLE_LP100: [4, 25],
+    fuelSanity(lp100) {
+        if (!(lp100 > 0)) return null;
+        const [lo, hi] = this.PLAUSIBLE_LP100;
+        if (lp100 < lo) return { ok: false, why: t('That is unusually low for a petrol car — check the figure.') };
+        if (lp100 > hi) return { ok: false, why: t('That is unusually high — check the figure.') };
+        return { ok: true };
+    },
+
+    // Show only the fields the chosen mode needs, and always show what the numbers
+    // imply in L/100km — a mistyped figure is obvious there and nowhere else.
+    _paintFuelSetting() {
+        const modeEl = document.getElementById('f-fuelmode');
+        const fields = document.getElementById('fuel-fields');
+        const implied = document.getElementById('fuel-implied');
+        if (!modeEl || !fields) return;
+        const f = this.getFuelSettings();
+        const mode = modeEl.value;
+        const price = `<div class="form-group"><label>${t('Price/Liter (SAR)')}</label><input type="number" id="f-fuelprice" step="0.01" value="${f.price || ''}" oninput="Features._paintFuelSetting()"></div>`;
+        if (mode === 'consumption') {
+            fields.innerHTML = `<div class="form-row"><div class="form-group"><label>${t('Consumption (L/100km)')}</label><input type="number" id="f-fuellp100" step="0.1" placeholder="11" value="${f.lp100 || ''}" oninput="Features._paintFuelSetting()"></div>${price}</div>`;
+        } else if (mode === 'monthly') {
+            fields.innerHTML = `<div class="form-row"><div class="form-group"><label>${t('Spend per month (SAR)')}</label><input type="number" id="f-fuelmonthly" step="1" placeholder="900" value="${f.monthly || ''}" oninput="Features._paintFuelSetting()"></div>${price}</div>`;
+        } else {
+            fields.innerHTML = '';
+            implied.style.display = 'none';
+            return;
+        }
+        // preview against a year of the owner's actual driving
+        const car = Storage.getCars()[0];
+        const rate = car ? Storage.getDailyKmRate(car.id) : null;
+        const kmYear = rate ? rate * 365 : null;
+        const lp100El = document.getElementById('f-fuellp100');
+        const monthlyEl = document.getElementById('f-fuelmonthly');
+        const priceEl = document.getElementById('f-fuelprice');
+        const p = parseFloat(priceEl && priceEl.value) || 0;
+        let lp100 = null, yearly = null;
+        if (mode === 'consumption') {
+            lp100 = parseFloat(lp100El && lp100El.value) || 0;
+            if (lp100 > 0 && p > 0 && kmYear) yearly = kmYear * lp100 / 100 * p;
+        } else {
+            const m = parseFloat(monthlyEl && monthlyEl.value) || 0;
+            if (m > 0) {
+                yearly = m * 12;
+                if (p > 0 && kmYear) lp100 = (yearly / p) / kmYear * 100;
+            }
+        }
+        if (!yearly) { implied.style.display = 'none'; return; }
+        const sanity = lp100 ? this.fuelSanity(lp100) : null;
+        implied.style.display = '';
+        implied.className = sanity && !sanity.ok ? 'derived derived-warn' : 'derived';
+        implied.innerHTML = `<span class="derived-label">${t('Works out at')}</span>
+            <span class="derived-value">${Math.round(yearly).toLocaleString()} ${t('SAR/year')}${lp100 ? ' &middot; ' + lp100.toFixed(1) + ' L/100km' : ''}</span>
+            ${sanity && !sanity.ok ? `<span class="derived-note">${sanity.why}</span>` : (kmYear ? `<span class="derived-note">${t('based on {km} km a year', {km: Math.round(kmYear).toLocaleString()})}</span>` : '')}`;
     },
 
     // ── Climate Adjustment ──

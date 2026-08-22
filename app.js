@@ -697,7 +697,7 @@ const App = {
                     <div class="car-detail"><span>${t("Plate")}</span><span>${c.plate||'-'}</span></div>
                     <div class="car-detail"><span>${t("Services")}</span><span>${sc}</span></div>
                     <div class="car-detail"><span>${t("Total Spent")}</span><span>${tc.toFixed(0)} SAR</span></div>
-                    ${cpk!==null?`<div class="car-detail"><span>${t("Running Cost")}</span><span>${cpk.toFixed(2)} SAR/km</span></div>`:''}
+                    ${cpk!==null?`<div class="car-detail"><span>${t("Running Cost")}</span><span>${cpk.toFixed(2)} SAR/km</span></div>${Features.costSplitLine(c.id)}`:''}
                 </div>
                 ${recallHTML}${ownHTML}${docsHTML}${recsHTML}${tireHTML}
                 <div class="car-card-actions">
