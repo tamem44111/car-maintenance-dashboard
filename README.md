@@ -54,6 +54,15 @@ inspection you attended: there the expiry is *suggested* a year out from the ser
 stays editable, so it never silently overwrites a date you typed. Centres come from
 `Features.INSPECTION_CENTRES` (Dammam, Khobar) — extend that array to add more.
 
+**The service picker is grouped, and grouping is display only.** `Recommendations.GROUPS`
+lays the picker out by system with what the car currently owes pinned on top
+(`dueTypes`). The strings inside it are data keys, so regrouping never touches stored
+history. Every type in `logTypes()` appears in `GROUPS` exactly once **except**
+`LEGACY_TYPES` — currently just `"Brake Pads"`, which stays valid for records made before
+the front/rear split but is no longer offered for new ones, since a fresh one names no
+axle and neither axle's schedule can see it. A due type therefore has two checkboxes,
+which is why the save path de-duplicates before filing.
+
 **Fuel is excluded from keep-or-sell.** You would pay it on any car, so it says nothing about whether
 *this* car is worth keeping. Only maintenance counts toward the verdict.
 
@@ -116,8 +125,6 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
   cost, note "Need to replace after 60000") is counted as a completed fluid change. The
   owner acts on this app, so this one matters most.
 - **Auto-reminder dates assume 40 km/day** (`App._estDate`) against a real rate of 105.
-- **`Alignment`** is in `ALL_TYPES` with no interval anywhere, so it can never produce a
-  status.
 - **Untranslated in Arabic:** `In {n}d` / `Today` (`app.js` upcoming-reminders card,
   `storage.js:getReminderStatus`), `or at` and `confirm('Delete?')` in the reminder card,
   `Still covered` / `Active` in the Warranty Center, the service-insight sentence on

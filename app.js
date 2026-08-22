@@ -221,11 +221,7 @@ const App = {
         const types = Recommendations.logTypes();
         const isEdit = !!service;
         const isOil = service && service.type === 'Oil Change';
-        const chips = types.map(t => {
-            const id = 'svc-'+t.toLowerCase().replace(/\s+/g,'-');
-            const preChecked = !isEdit && presetType === t;
-            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${t}" ${isEdit&&service.type===t?'checked':''} ${preChecked?'checked':''} ${isEdit?'disabled':''} onchange="App._toggleServiceExtras()"><span class="service-chip-label">${I18N.t(t)}</span></label>`;
-        }).join('');
+        const chips = isEdit ? '' : this._serviceChips(cars.find(c => c.id === (presetCarId || (this.selectedCarId !== 'all' ? this.selectedCarId : (cars[0] && cars[0].id)))), presetType);
         // Fall back to the car currently filtered, else the first one, so the odometer
         // can always be pre-filled instead of being typed by hand.
         const selCar = service ? service.carId
@@ -233,7 +229,7 @@ const App = {
         const html = `
             <div class="form-group"><label>Car</label><select id="f-car" onchange="App._syncServiceMileage()">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-group"><label>${isEdit?'Service Type':'Services Performed (select all that apply)'}</label>
-                ${isEdit?`<select id="f-type" onchange="App._toggleServiceExtras()">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select>`:`<div class="service-chips">${chips}</div>`}
+                ${isEdit?`<select id="f-type" onchange="App._toggleServiceExtras()">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select>`:`<div class="svc-picker">${chips}</div>`}
             </div>
             <div id="oil-options" style="display:${isOil||presetType==='Oil Change'?'block':'none'}">
                 <div class="form-group"><label>Oil Type (next change interval)</label>
@@ -296,7 +292,9 @@ const App = {
                 else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date);
                 Storage.updateService(service.id,data);
             } else {
-                const selected=[...document.querySelectorAll('.service-chips input:checked')].map(cb=>cb.value);
+                // A due type appears twice — in the pinned row and in its group — so the
+                // same job would otherwise be filed twice.
+                const selected=[...new Set([...document.querySelectorAll('.service-chips input:checked')].map(cb=>cb.value))];
                 if(!selected.length) return alert('Select at least one service.');
                 // With bills the total is already itemised, so it attaches to the first
                 // service only — splitting it again would double-count. Without bills the
@@ -308,6 +306,9 @@ const App = {
                     const list=dupes.join(', ');
                     if(!confirm(`You already have a record for ${list} on ${date} at this mileage.\n\nAdd it again anyway?`)) return;
                 }
+                // Logging a timing belt tells us the engine is belt-driven, which is what
+                // the schedule needs in order to stop ignoring it.
+                if(selected.includes('Timing Belt')&&car&&!car.timingType) Storage.updateCar(carId,{timingType:'belt'});
                 selected.forEach((type,i)=>{
                     const data={carId,type,date,mileage,notes,padThickness,
                         cost: bills.length ? (i===0?cost:'0') : cps,
@@ -386,7 +387,7 @@ const App = {
         const sel = document.getElementById('f-type');
         const picked = sel
             ? [sel.value]
-            : [...document.querySelectorAll('.service-chips input:checked')].map(c => c.value);
+            : [...new Set([...document.querySelectorAll('.service-chips input:checked')].map(c => c.value))];
         const oil = document.getElementById('oil-options');
         const brake = document.getElementById('brake-options');
         if (oil) oil.style.display = picked.includes('Oil Change') ? 'block' : 'none';
@@ -397,6 +398,49 @@ const App = {
             insp.style.display = on ? 'block' : 'none';
             if (on) this._paintInspectionDerived();
         }
+        this._paintBeltNote(picked);
+    },
+
+    // Timing Belt is offered to everyone, but the schedule ignores it until the car
+    // says belt or chain. Rather than ask, say plainly what saving will record.
+    _paintBeltNote(picked) {
+        const note = document.getElementById('svc-belt-note');
+        if (!note) return;
+        const sel = document.getElementById('f-car');
+        const car = sel ? Storage.getCars().find(c => c.id === sel.value) : null;
+        const needed = picked.includes('Timing Belt') && car && !car.timingType;
+        note.style.display = needed ? 'block' : 'none';
+        if (needed) note.textContent = t('Saving this records the car as belt-driven, so timing belt reminders start working.');
+    },
+
+    // The picker: what the car owes pinned on top, then every type grouped by system.
+    // Grouping and order are display only — the values are data keys, so none of this
+    // touches stored history.
+    _serviceChips(car, presetType) {
+        const chip = (type, prefix, label) => {
+            const id = 'svc-' + (prefix || '') + type.toLowerCase().replace(/\s+/g, '-');
+            return `<label class="service-chip"><input type="checkbox" id="${id}" value="${type}" ${presetType === type ? 'checked' : ''} onchange="App._syncChip(this)"><span class="service-chip-label">${label || I18N.t(type)}</span></label>`;
+        };
+        let html = '';
+        const due = car ? Recommendations.dueTypes(car) : [];
+        if (due.length) {
+            html += `<div class="svc-due"><div class="svc-due-head">${t('Due on your {car}', { car: car.make + ' ' + car.model })}</div><div class="service-chips">${
+                due.map(st => chip(st.type, 'due-',
+                    `<span class="svc-dot ${st.status === 'overdue' ? 'svc-dot-red' : 'svc-dot-amber'}"></span>${I18N.t(st.type)}<span class="svc-tag">${st.detail}</span>`)).join('')
+            }</div></div>`;
+        }
+        html += Recommendations.GROUPS.map(([group, types]) =>
+            `<div class="svc-group"><div class="svc-group-head">${t(group)}</div><div class="service-chips">${types.map(ty => chip(ty)).join('')}</div></div>`).join('');
+        return html + `<div id="svc-belt-note" class="field-note" style="display:none"></div>`;
+    },
+
+    // A due type has two checkboxes — one in the pinned row, one in its group.
+    // Keep them in step so ticking either reads correctly in both places.
+    _syncChip(el) {
+        document.querySelectorAll('.service-chips input[type="checkbox"]').forEach(i => {
+            if (i.value === el.value && i !== el) i.checked = el.checked;
+        });
+        this._toggleServiceExtras();
     },
 
     // Pre-fill "Mileage at Service" from the selected car's current reading

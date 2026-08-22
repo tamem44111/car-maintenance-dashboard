@@ -2048,3 +2048,25 @@ tr:hover td { background: var(--card-hover); }
 .derived-warn{background:var(--orange-bg);border-color:var(--orange-border)}
 .derived-warn .derived-label{color:var(--orange)}
 .derived-warn .derived-value{font-size:13.5px;font-weight:600;color:var(--orange)}
+
+/* ── Service picker: due row, then groups ───────────────────────────────
+   Grouping is presentation only. The chip values are data keys and never
+   change; see Recommendations.GROUPS. */
+.svc-picker { display: flex; flex-direction: column; gap: 14px; }
+.svc-group-head, .svc-due-head {
+    font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+    color: var(--text3); margin-bottom: 9px;
+}
+.svc-due {
+    background: var(--orange-bg); border: 1px solid var(--orange-border);
+    border-radius: 11px; padding: 11px 12px;
+}
+.svc-due-head { color: var(--orange); margin-bottom: 9px; }
+.svc-dot {
+    display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    margin-inline-end: 6px; vertical-align: middle;
+}
+.svc-dot-red { background: var(--red); }
+.svc-dot-amber { background: var(--orange); }
+.svc-tag { font-size: 10.5px; font-weight: 400; color: var(--text3); margin-inline-start: 6px; }
+.service-chip input:checked + .service-chip-label .svc-tag { color: var(--primary); }

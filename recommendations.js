@@ -183,15 +183,45 @@ const Recommendations = {
     },
 
     // Types carrying a schedule
-    ALL_TYPES: ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Front Brake Pads', 'Rear Brake Pads', 'Air Filter', 'Cabin Air Filter', 'AC Service', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs', 'Timing Belt', 'Alignment'],
+    ALL_TYPES: ['Oil Change', 'Tire Rotation', 'Brake Inspection', 'Front Brake Pads', 'Rear Brake Pads', 'Air Filter', 'Cabin Air Filter', 'AC Service', 'Transmission', 'Coolant Flush', 'Battery', 'Spark Plugs', 'Timing Belt'],
 
-    // Extra types you can log but that carry no default interval — discs are
-    // replaced on condition rather than mileage, and the plain "Brake Pads" entry
-    // is kept so records made before the front/rear split still work.
-    LOG_ONLY_TYPES: ['Periodic Inspection', 'Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid', 'Brake Pads', 'Suspension', 'Wheel Bearing'],
+    // Extra types you can log but that carry no default interval — discs and
+    // alignment are done on symptom rather than mileage, and the plain "Brake Pads"
+    // entry is kept so records made before the front/rear split still work.
+    // Alignment sat in ALL_TYPES for a long time with no interval defined anywhere,
+    // so it could never produce a status. This is where it always belonged.
+    LOG_ONLY_TYPES: ['Periodic Inspection', 'Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid', 'Brake Pads', 'Suspension', 'Wheel Bearing', 'Alignment'],
+
+    // Kept working for old records, but no longer offered for new ones: a fresh
+    // "Brake Pads" entry names no axle, so neither the front nor the rear schedule
+    // can see it. Editing an existing one still works.
+    LEGACY_TYPES: ['Brake Pads'],
 
     // Everything selectable when logging a job
     logTypes() { return this.ALL_TYPES.concat(this.LOG_ONLY_TYPES, ['Other']); },
+
+    // How the picker is laid out. Grouping and order are presentation only —
+    // the strings are data keys, so regrouping never touches stored history.
+    // Every type in logTypes() appears here exactly once, except LEGACY_TYPES.
+    GROUPS: [
+        ['Routine',               ['Oil Change', 'Tire Rotation', 'Air Filter', 'Cabin Air Filter']],
+        ['Brakes',                ['Brake Inspection', 'Front Brake Pads', 'Rear Brake Pads', 'Front Brake Discs', 'Rear Brake Discs', 'Brake Fluid']],
+        ['Engine & drivetrain',   ['Transmission', 'Spark Plugs', 'Coolant Flush', 'Timing Belt']],
+        ['Steering & suspension', ['Alignment', 'Suspension', 'Wheel Bearing']],
+        ['Electrical & climate',  ['Battery', 'AC Service']],
+        ['Other',                 ['Periodic Inspection', 'Other']]
+    ],
+
+    // What the car currently owes, most urgent first — the pinned row at the top
+    // of the picker. Usually one to three items.
+    dueTypes(car, limit = 5) {
+        if (!car) return [];
+        return this.ALL_TYPES
+            .map(type => this.getMaintenanceStatus(car, type))
+            .filter(st => st && st.status !== 'ok')
+            .sort((a, b) => (a.status === b.status ? 0 : a.status === 'overdue' ? -1 : 1))
+            .slice(0, limit);
+    },
 
     isBrakeType(t) { return typeof t === 'string' && /brake/i.test(t); },
 

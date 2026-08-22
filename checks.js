@@ -146,6 +146,31 @@ const Checks = {
         const notDupe = Storage.findDuplicateService({ carId: 'test-car', type: 'Oil Change', date: day(31), mileage: '96700' });
         this.ok('a different date is not a duplicate', !notDupe);
 
+        // -- the picker's grouping must stay in step with the type lists --
+        const grouped = Recommendations.GROUPS.flatMap(g => g[1]);
+        const dupes = grouped.filter((t, i) => grouped.indexOf(t) !== i);
+        this.eq('no type is listed in two groups', dupes, []);
+        this.eq('every grouped type is a real type',
+            grouped.filter(t => !Recommendations.logTypes().includes(t)), []);
+        this.eq('the only ungrouped type is the legacy one',
+            Recommendations.logTypes().filter(t => !grouped.includes(t)), Recommendations.LEGACY_TYPES);
+        this.ok('the legacy Brake Pads entry is still a valid type for old records',
+            Recommendations.logTypes().includes('Brake Pads'));
+
+        // Alignment claimed to be scheduled but no interval exists for it anywhere,
+        // so it could never report a status. It belongs with the condition-based jobs.
+        this.ok('Alignment is not claimed as scheduled', !Recommendations.ALL_TYPES.includes('Alignment'));
+        this.ok('Alignment is still loggable', Recommendations.logTypes().includes('Alignment'));
+        this.eq('every scheduled type can actually produce a status',
+            Recommendations.ALL_TYPES.filter(t => Recommendations.appliesTo(car, t) && !Recommendations.getEffective(car, t)), []);
+
+        // -- the pinned due row --
+        const due = Recommendations.dueTypes(car);
+        this.ok('the due row finds the overdue air filter', due.some(d => d.type === 'Air Filter'), JSON.stringify(due.map(d => d.type)));
+        this.eq('nothing healthy reaches the due row', due.filter(d => d.status === 'ok'), []);
+        this.ok('the due row puts overdue before due-soon',
+            due.every((d, i) => i === 0 || !(d.status === 'overdue' && due[i - 1].status === 'soon')));
+
         // -- REGRESSION: a backup must carry settings, or restoring it silently
         //    lengthens every interval by 25% --
         A.W.localStorage.setItem('autocare_climate', 'severe');
@@ -156,7 +181,7 @@ const Checks = {
 
     // ═══════════════ render checks ═══════════════
     async render(A) {
-        const { App, I18N, Features, Storage, W, D } = A;
+        const { App, I18N, Features, Storage, Recommendations, W, D } = A;
         const pages = ['dashboard', 'cars', 'services', 'fuel', 'expenses', 'warranty', 'reminders'];
         const modals = {
             'add car': () => App.openCarModal(),
@@ -214,6 +239,26 @@ const Checks = {
                 App.closeModal();
             }
         }
+
+        // -- REGRESSION: a due type appears in the pinned row AND in its group.
+        //    Ticking one must tick both, and must still file a single job. --
+        App.openServiceModal();
+        const boxes = [...D.querySelectorAll('.service-chips input[type="checkbox"]')];
+        const airBoxes = boxes.filter(b => b.value === 'Air Filter');
+        this.eq('an overdue type shows in both the due row and its group', airBoxes.length, 2);
+        airBoxes[0].checked = true;
+        App._syncChip(airBoxes[0]);
+        this.ok('ticking one of the pair ticks the other', airBoxes[1].checked);
+        const picked = [...new Set([...D.querySelectorAll('.service-chips input:checked')].map(b => b.value))];
+        this.eq('the pair still counts as one job', picked, ['Air Filter']);
+        // every type is reachable, and the legacy one is not offered
+        const offered = [...new Set(boxes.map(b => b.value))];
+        this.eq('the picker offers every type except the legacy one',
+            offered.sort(), Recommendations.logTypes().filter(t => !Recommendations.LEGACY_TYPES.includes(t)).sort());
+        this.ok('the legacy type is not offered for new records', !offered.includes('Brake Pads'));
+        this.eq('the picker shows a heading per group',
+            D.querySelectorAll('.svc-group-head').length, Recommendations.GROUPS.length);
+        App.closeModal();
 
         // -- REGRESSION: the empty states that once printed their own source --
         const saved = W.localStorage.getItem('autocare_data');
