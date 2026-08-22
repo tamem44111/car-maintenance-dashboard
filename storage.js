@@ -791,6 +791,51 @@ const Storage = {
     // ── Tyre age ──
     // Rubber hardens with heat and time regardless of tread depth, which matters
     // more here than tread wear does.
+    // ── Planning a journey ────────────────────────────────────────────────
+    // This owner drives between cities, so the useful question is not "what is
+    // due?" but "what runs out while I am 700 km from home?". Everything here is
+    // the existing schedule read forward over one trip's distance.
+    planTrip(carId, tripKm) {
+        const car = this.getCars().find(c => c.id === carId);
+        if (!car || !(tripKm > 0)) return null;
+        const startKm = this.getEffectiveMileage(car);
+        const endKm = startKm + tripKm;
+
+        // What is already overdue before setting off, and what falls due en route
+        const overdue = [], during = [];
+        Recommendations.ALL_TYPES.forEach(type => {
+            const st = Recommendations.getMaintenanceStatus(car, type);
+            if (!st || st.status === 'unknown') return;
+            if (st.status === 'overdue') { overdue.push(st); return; }
+            if (st.nextKm && st.nextKm > startKm && st.nextKm <= endKm) {
+                during.push({ ...st, atKm: st.nextKm, intoTrip: st.nextKm - startKm });
+            }
+        });
+        during.sort((a, b) => a.intoTrip - b.intoTrip);
+
+        // Tyres are the item that strands you at speed, and they are judged
+        // separately from the schedule, so they are checked separately here too.
+        const tyre = this.getTyreStatus(car);
+        const tyreRunsOut = tyre && tyre.kmLeft !== null && tyre.kmLeft < tripKm
+            ? { atKm: startKm + Math.max(0, tyre.kmLeft), intoTrip: Math.max(0, tyre.kmLeft) } : null;
+
+        // Cost of the drive itself
+        const fuelEst = (typeof Features !== 'undefined') ? Features.getFuelEstimateFor(carId, tripKm) : null;
+        const breakdown = this.getCostBreakdown(carId);
+        const wear = breakdown ? breakdown.maintPerKm * tripKm : null;
+
+        return {
+            tripKm, startKm, endKm,
+            overdue, during, tyre, tyreRunsOut,
+            unknown: Recommendations.unknownTypes(car),
+            fuelCost: fuelEst ? fuelEst.cost : null,
+            litres: fuelEst ? fuelEst.litres : null,
+            wearCost: wear,
+            totalCost: (fuelEst ? fuelEst.cost : 0) + (wear || 0),
+            days: (() => { const r = this.getDailyKmRate(carId); return r > 0 ? Math.round(tripKm / r) : null; })()
+        };
+    },
+
     // Tyres get their own logic rather than joining the generic schedule, because
     // they are judged three ways at once: distance on the set, age of the rubber
     // (which hardens in heat regardless of tread), and the tread itself. Keeping

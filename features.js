@@ -634,6 +634,62 @@ const Features = {
         box.innerHTML = '';
     },
 
+    // ── Trip planner ──────────────────────────────────────────────────────
+    // Two questions in one screen: what does this drive cost, and what runs out
+    // while I am a long way from my own workshop.
+    openTripModal(carId = null) {
+        const cars = Storage.getCars();
+        if (!cars.length) return alert(t('Please add a car first.'));
+        const target = carId || (App.selectedCarId !== 'all' ? App.selectedCarId : cars[0].id);
+        const html = `
+            <p class="doc-intro">${t('How far are you going? Tick return for a round trip.')}</p>
+            ${cars.length > 1 ? `<div class="form-group"><label>${t('Car')}</label><select id="f-trip-car" onchange="Features._paintTrip()">${cars.map(c => `<option value="${c.id}" ${c.id === target ? 'selected' : ''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>` : `<input type="hidden" id="f-trip-car" value="${target}">`}
+            <div class="form-group"><label>${t('One-way distance (km)')}</label><input type="number" id="f-trip-km" inputmode="numeric" placeholder="400" oninput="Features._paintTrip()"></div>
+            <label class="trip-return"><input type="checkbox" id="f-trip-return" checked onchange="Features._paintTrip()"> ${t('Return trip')}</label>
+            <div id="trip-result"></div>`;
+        App.openModal(t('Plan a trip'), html, null);
+        // nothing to save — this screen only answers a question
+        document.getElementById('modal-save').style.display = 'none';
+        setTimeout(() => { const i = document.getElementById('f-trip-km'); if (i) i.focus(); }, 60);
+    },
+
+    _paintTrip() {
+        const box = document.getElementById('trip-result');
+        if (!box) return;
+        const carId = document.getElementById('f-trip-car').value;
+        const oneWay = parseInt(document.getElementById('f-trip-km').value) || 0;
+        const isReturn = document.getElementById('f-trip-return').checked;
+        const km = oneWay * (isReturn ? 2 : 1);
+        if (!km) { box.innerHTML = ''; return; }
+        const p = Storage.planTrip(carId, km);
+        if (!p) { box.innerHTML = ''; return; }
+
+        const money = n => Math.round(n).toLocaleString();
+        const row = (cls, title, sub) => `<div class="trip-item ${cls}"><div class="trip-item-title">${title}</div><div class="trip-item-sub">${sub}</div></div>`;
+        let out = `<div class="trip-cost">
+            <div class="trip-cost-main">${money(p.totalCost)} <small>${t('SAR')}</small></div>
+            <div class="trip-cost-sub">${t('{km} km', {km: km.toLocaleString()})}${p.litres ? ' &middot; ' + Math.round(p.litres) + ' ' + t('L') : ''}${p.fuelCost !== null ? ' &middot; ' + t('fuel {a} + wear {b}', {a: money(p.fuelCost), b: money(p.wearCost || 0)}) : ' &middot; ' + t('set your fuel figures to include petrol')}</div>
+        </div>`;
+
+        // Blocking things first: overdue before you leave, then anything that
+        // runs out mid-journey, when you are furthest from your own workshop.
+        p.overdue.forEach(st => out += row('trip-bad',
+            t('{type} is already overdue', {type: I18N.t(st.type)}), st.detail));
+        if (p.tyreRunsOut) out += row('trip-bad', t('Tyres run out during this trip'),
+            t('about {km} km in', {km: p.tyreRunsOut.intoTrip.toLocaleString()}) + ' &middot; ' + p.tyre.detail);
+        p.during.forEach(st => out += row('trip-warn',
+            t('{type} falls due during this trip', {type: I18N.t(st.type)}),
+            t('about {km} km in', {km: st.intoTrip.toLocaleString()}) + ' &middot; ' + t('at {km} km', {km: st.atKm.toLocaleString()})));
+
+        if (!p.overdue.length && !p.during.length && !p.tyreRunsOut) {
+            out += row('trip-ok', t('Nothing falls due on this trip'), t('based on what the app knows about this car'));
+        }
+        if (p.unknown.length) out += row('trip-unknown',
+            t('{n} services have no record', {n: p.unknown.length}),
+            t('this check cannot see those \u2014 fill them in for a complete answer'));
+        box.innerHTML = out;
+    },
+
     // ── Backfill: telling the app what happened before you started logging ──
     // Most owners start logging partway through a car's life, so a missing record
     // usually means "not logged yet", not "never done". This turns those unknowns
@@ -1081,6 +1137,7 @@ const Features = {
         el.innerHTML = `<div class="quick-bar">
             <button class="quick-btn quick-btn-primary" onclick="Features.openOdometerModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/></svg> ${t("Update km")}</button>
             <button class="quick-btn" onclick="App.openFuelModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/><path d="M13 10h2a2 2 0 012 2v3a2 2 0 002 2v0a2 2 0 002-2V8l-3-3" stroke="currentColor" stroke-width="2" fill="none"/></svg> ${t("Quick Fuel")}</button>
+            <button class="quick-btn" onclick="Features.openTripModal()" title="${t('Plan a trip')}"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M12 21s7-6.3 7-11a7 7 0 10-14 0c0 4.7 7 11 7 11z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><circle cx="12" cy="10" r="2.5" stroke="currentColor" stroke-width="2" fill="none"/></svg> ${t("Plan a trip")}</button>
             <button class="quick-btn" onclick="App.openRepeatPicker()" title="Log a job you've done before"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M3 12a9 9 0 0115-6.7L21 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M21 3v5h-5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/><path d="M21 12a9 9 0 01-15 6.7L3 16" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M3 21v-5h5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg> ${t("Repeat")}</button>
             <button class="quick-btn" onclick="App.openServiceModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg> ${t("Quick Service")}</button>
             <button class="quick-btn" onclick="App.openReminderModal()"><svg viewBox="0 0 24 24" width="18" height="18"><path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9" stroke="currentColor" stroke-width="2" fill="none"/></svg> ${t("Add Reminder")}</button>

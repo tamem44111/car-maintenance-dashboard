@@ -75,6 +75,15 @@ the front/rear split but is no longer offered for new ones, since a fresh one na
 axle and neither axle's schedule can see it. A due type therefore has two checkboxes,
 which is why the save path de-duplicates before filing.
 
+**The trip planner reads the schedule forward.** This owner drives between cities, so the
+question that matters is not "what is due?" but "what runs out while I am 700 km from my
+own workshop?". `Storage.planTrip` projects the odometer over one journey and reports what
+is already overdue, what crosses its threshold en route — as a distance *into* the trip,
+not an absolute reading — and what the drive itself costs in fuel and wear. Tyres are
+checked separately because they are judged separately. Items with no record are counted
+and named, never silently skipped: a check that quietly ignores six services would give
+false confidence, which on a long drive is worse than no answer.
+
 **Tyres are judged separately from the schedule.** `Storage.getTyreStatus` is the single
 authority, because tyres run out three ways at once — distance on the set, age of the
 rubber (which hardens in heat whatever the tread looks like), and tread itself. It merges

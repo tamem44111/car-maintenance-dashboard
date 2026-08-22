@@ -2092,3 +2092,22 @@ tr:hover td { background: var(--card-hover); }
 .tyre-state.red { color: var(--red); font-weight: 600; }
 .tyre-state.orange { color: var(--orange); font-weight: 600; }
 .tyre-state.green { color: var(--text2); }
+
+/* Trip planner — cost first, then anything that runs out while you are away. */
+.trip-return { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text2);
+               padding: 10px 0; cursor: pointer; }
+.trip-return input { width: auto; margin: 0; }
+.trip-cost { background: var(--primary-light); border-radius: 12px; padding: 14px 16px; margin: 4px 0 12px; }
+.trip-cost-main { font-size: 28px; font-weight: 700; color: var(--primary); line-height: 1.1; }
+.trip-cost-main small { font-size: 14px; font-weight: 600; }
+.trip-cost-sub { font-size: 12px; color: var(--text2); margin-top: 4px; }
+.trip-item { border-inline-start: 3px solid var(--border); padding: 9px 0 9px 12px;
+             padding-inline-start: 12px; margin-bottom: 8px; }
+.trip-item-title { font-size: 13.5px; font-weight: 600; color: var(--text); }
+.trip-item-sub { font-size: 12px; color: var(--text3); margin-top: 2px; }
+.trip-bad { border-inline-start-color: var(--red); }
+.trip-bad .trip-item-title { color: var(--red); }
+.trip-warn { border-inline-start-color: var(--orange); }
+.trip-warn .trip-item-title { color: var(--orange); }
+.trip-ok { border-inline-start-color: var(--green); }
+.trip-unknown { border-inline-start-color: var(--blue); }

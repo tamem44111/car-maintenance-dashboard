@@ -181,6 +181,48 @@ const Checks = {
         this.eq('a backfilled item now has a due date', typeof after.dueDate, 'string');
         this.seed(A.W);
 
+        // -- trip planner: the schedule read forward over one journey --
+        this.eq('a trip needs a distance', Storage.planTrip('test-car', 0), null);
+        const shortTrip = Storage.planTrip('test-car', 100);
+        this.eq('a trip starts from the projected odometer', shortTrip.startKm, Storage.getEffectiveMileage(car));
+        this.eq('and ends a trip further on', shortTrip.endKm, shortTrip.startKm + 100);
+        this.ok('an already-overdue item is flagged before setting off',
+            shortTrip.overdue.some(o => o.type === 'Air Filter'));
+        this.eq('nothing unknown is claimed to fall due',
+            shortTrip.during.filter(d => d.status === 'unknown'), []);
+
+        // Something whose threshold sits inside the trip must be caught, and
+        // reported as a distance into the journey rather than an absolute reading.
+        const oilSt = Recommendations.getMaintenanceStatus(car, 'Oil Change');
+        const reach = oilSt.nextKm - Storage.getEffectiveMileage(car) + 10;
+        const longTrip = Storage.planTrip('test-car', reach);
+        const hit = longTrip.during.find(d => d.type === 'Oil Change');
+        this.ok('an item falling due mid-journey is caught', !!hit,
+            JSON.stringify(longTrip.during.map(d => d.type)));
+        if (hit) {
+            this.eq('it is reported as distance into the trip', hit.intoTrip, hit.atKm - longTrip.startKm);
+            this.ok('and that distance is inside the trip', hit.intoTrip > 0 && hit.intoTrip <= reach);
+        }
+
+        // Tyres are checked separately, because they are judged separately
+        Storage.updateCar('test-car', { tires: { installedDate: day(300), installedMileage: '55000' } });
+        A.W.localStorage.setItem('autocare_climate', 'normal');
+        const tyreTrip = Storage.planTrip('test-car', 20000);
+        this.ok('tyres running out mid-journey are flagged', !!tyreTrip.tyreRunsOut);
+        const safeTrip = Storage.planTrip('test-car', 50);
+        this.eq('a short hop does not flag the tyres', safeTrip.tyreRunsOut, null);
+        this.seed(A.W);
+
+        // Cost of the drive uses the fuel setting, and says so when there is none
+        Features.saveFuelSettings({ mode: 'off' });
+        this.eq('with no fuel setting the trip reports no fuel cost',
+            Storage.planTrip('test-car', 500).fuelCost, null);
+        Features.saveFuelSettings({ mode: 'consumption', lp100: '11', price: '2.33' });
+        const priced = Storage.planTrip('test-car', 500);
+        this.near('trip fuel cost is litres x price', priced.fuelCost, 500 * 11 / 100 * 2.33, 0.01);
+        this.ok('trip total is fuel plus wear', priced.totalCost > priced.fuelCost);
+        Features.saveFuelSettings({ mode: 'off' });
+
         // -- tyres: judged on distance and on rubber age, whichever binds first --
         this.eq('with no tyre information there is no status', Storage.getTyreStatus(car), null);
         this.ok('Tires is loggable', Recommendations.logTypes().includes('Tires'));
