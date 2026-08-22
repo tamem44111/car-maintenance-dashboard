@@ -479,21 +479,21 @@ const App = {
             <div class="form-group"><label>${t('Car')}</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${log&&log.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-row">
                 <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" value="${log?log.date:new Date().toISOString().split('T')[0]}"></div>
-                <div class="form-group"><label>Odometer (km)</label><input type="number" id="f-odo" placeholder="50000" value="${log?log.odometer:''}"></div>
+                <div class="form-group"><label>${t('Odometer (km)')}</label><input type="number" id="f-odo" placeholder="50000" value="${log?log.odometer:''}"></div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>Liters</label><input type="number" id="f-liters" placeholder="45" step="0.1" value="${log?log.liters:''}"></div>
-                <div class="form-group"><label>Price/Liter (SAR)</label><input type="number" id="f-ppl" placeholder="2.18" step="0.01" value="${log?log.pricePerLiter:''}"></div>
+                <div class="form-group"><label>${t('Liters')}</label><input type="number" id="f-liters" placeholder="45" step="0.1" value="${log?log.liters:''}"></div>
+                <div class="form-group"><label>${t('Price/Liter (SAR)')}</label><input type="number" id="f-ppl" placeholder="2.18" step="0.01" value="${log?log.pricePerLiter:''}"></div>
             </div>
-            <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-ftotal" placeholder="Auto-calculated" step="0.01" value="${log?log.totalCost:''}"></div>
-            <div class="form-group"><label>Station</label><input type="text" id="f-station" placeholder="Optional" value="${log?log.station||'':''}"></div>`;
+            <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-ftotal" placeholder="${t('Auto-calculated')}" step="0.01" value="${log?log.totalCost:''}"></div>
+            <div class="form-group"><label>${t('Station')}</label><input type="text" id="f-station" placeholder="${t('Optional')}" value="${log?log.station||'':''}"></div>`;
         this.openModal(log?'Edit Fuel Log':'Add Fuel Log', html, () => {
             const liters=parseFloat(document.getElementById('f-liters').value)||0;
             const ppl=parseFloat(document.getElementById('f-ppl').value)||0;
             let total=parseFloat(document.getElementById('f-ftotal').value)||0;
             if(!total&&liters&&ppl) total=liters*ppl;
             const data={carId:document.getElementById('f-car').value,date:document.getElementById('f-date').value,odometer:document.getElementById('f-odo').value,liters:liters.toString(),pricePerLiter:ppl.toString(),totalCost:total.toFixed(2),station:document.getElementById('f-station').value.trim()};
-            if(!data.date||!data.odometer) return alert('Date and odometer are required.');
+            if(!data.date||!data.odometer) return alert(t('Date and odometer are required.'));
             if(log) Storage.updateFuelLog(log.id,data); else Storage.addFuelLog(data);
             this.closeModal(); this.renderPage(this.currentPage);
         });
@@ -512,15 +512,15 @@ const App = {
         const types = ['Oil Change','Tire Rotation','Brake Inspection','Air Filter','Registration Renewal','Insurance Renewal','Inspection','Other'];
         const html = `
             <div class="form-group"><label>${t('Car')}</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${reminder&&reminder.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
-            <div class="form-group"><label>Reminder For</label><select id="f-type">${types.map(t=>`<option value="${t}" ${reminder&&reminder.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select></div>
+            <div class="form-group"><label>${t('Reminder For')}</label><select id="f-type">${types.map(t=>`<option value="${t}" ${reminder&&reminder.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select></div>
             <div class="form-row">
-                <div class="form-group"><label>Due Date</label><input type="date" id="f-duedate" value="${reminder?reminder.dueDate:''}"></div>
-                <div class="form-group"><label>Due Mileage (km)</label><input type="number" id="f-duemileage" placeholder="Optional" value="${reminder?reminder.dueMileage||'':''}"></div>
+                <div class="form-group"><label>${t('Due Date')}</label><input type="date" id="f-duedate" value="${reminder?reminder.dueDate:''}"></div>
+                <div class="form-group"><label>${t('Due Mileage (km)')}</label><input type="number" id="f-duemileage" placeholder="${t('Optional')}" value="${reminder?reminder.dueMileage||'':''}"></div>
             </div>
-            <div class="form-group"><label>Notes</label><textarea id="f-rnotes" rows="2" placeholder="Optional...">${reminder?reminder.notes||'':''}</textarea></div>`;
+            <div class="form-group"><label>${t('Notes')}</label><textarea id="f-rnotes" rows="2" placeholder="${t('Optional...')}">${reminder?reminder.notes||'':''}</textarea></div>`;
         this.openModal(reminder?'Edit Reminder':'Add Reminder', html, () => {
             const data={carId:document.getElementById('f-car').value,type:document.getElementById('f-type').value,dueDate:document.getElementById('f-duedate').value,dueMileage:document.getElementById('f-duemileage').value,notes:document.getElementById('f-rnotes').value.trim(),completed:reminder?reminder.completed:false};
-            if(!data.dueDate) return alert('Please select a due date.');
+            if(!data.dueDate) return alert(t('Please select a due date.'));
             if(reminder) Storage.updateReminder(reminder.id,data); else Storage.addReminder(data);
             this.closeModal(); this.renderPage(this.currentPage);
         });
@@ -602,7 +602,7 @@ const App = {
 
         // Upcoming reminders
         const remEl=document.getElementById('upcoming-reminders');
-        remEl.innerHTML=reminders.slice(0,5).length?reminders.slice(0,5).map(r=>{const car=cars.find(c=>c.id===r.carId);const days=Math.ceil((new Date(r.dueDate)-new Date())/86400000);let badge='badge-blue';if(days<0)badge='badge-red';else if(days<=7)badge='badge-orange';const label=days<0?Math.abs(days)+'d overdue':days===0?'Today':'In '+days+'d';return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(r.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:''}</small></div><span class="badge ${badge}">${label}</span></div>`;}).join(''):`<p class="empty-state">${t("No upcoming reminders")}</p>`;
+        remEl.innerHTML=reminders.slice(0,5).length?reminders.slice(0,5).map(r=>{const car=cars.find(c=>c.id===r.carId);const days=Math.ceil((new Date(r.dueDate)-new Date())/86400000);let badge='badge-blue';if(days<0)badge='badge-red';else if(days<=7)badge='badge-orange';const label=days<0?t('{d}d overdue',{d:Math.abs(days)}):days===0?t('Today'):t('In {d}d',{d:days});return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(r.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:''}</small></div><span class="badge ${badge}">${label}</span></div>`;}).join(''):`<p class="empty-state">${t("No upcoming reminders")}</p>`;
     },
 
     // ── Render: Cars ──

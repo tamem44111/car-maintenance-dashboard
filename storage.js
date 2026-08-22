@@ -631,13 +631,14 @@ const Storage = {
         // Describe by whichever limit runs out first
         const kmIsBinding = kmDays !== null && (daysRemaining === null || kmDays < daysRemaining);
         let detail;
+        const T = (str, vars) => (typeof I18N !== 'undefined' ? I18N.t(str, vars) : str);
         if (overdue) {
-            if (kmRemaining !== null && kmRemaining <= 0) detail = Math.abs(kmRemaining).toLocaleString() + ' km over';
-            else detail = Math.abs(daysRemaining) + 'd overdue';
+            if (kmRemaining !== null && kmRemaining <= 0) detail = T('{km} km over', {km: Math.abs(kmRemaining).toLocaleString()});
+            else detail = T('{d}d overdue', {d: Math.abs(daysRemaining)});
         } else if (kmIsBinding) {
-            detail = kmRemaining.toLocaleString() + ' km left';
+            detail = T('{km} km left', {km: kmRemaining.toLocaleString()});
         } else if (daysRemaining !== null) {
-            detail = daysRemaining === 0 ? 'Due today' : 'In ' + daysRemaining + 'd';
+            detail = daysRemaining === 0 ? T('Due today') : T('In {d}d', {d: daysRemaining});
         } else {
             detail = '—';
         }

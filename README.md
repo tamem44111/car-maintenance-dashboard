@@ -125,11 +125,11 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
   cost, note "Need to replace after 60000") is counted as a completed fluid change. The
   owner acts on this app, so this one matters most.
 - **Auto-reminder dates assume 40 km/day** (`App._estDate`) against a real rate of 105.
-- **Untranslated in Arabic:** `In {n}d` / `Today` (`app.js` upcoming-reminders card,
-  `storage.js:getReminderStatus`), `or at` and `confirm('Delete?')` in the reminder card,
-  `Still covered` / `Active` in the Warranty Center, the service-insight sentence on
-  Expenses, and most labels in the Add Service modal (Car, Date, Notes, oil type, brake
-  pad thickness).
+- **Untranslated in Arabic:** `or at` and `confirm('Delete?')` in the reminder card,
+  `Still covered` / `Active` in the Warranty Center, and the service-insight sentence on
+  Expenses. Also **auto-generated reminder notes** ("Auto: next Air Filter at 437,881 km"),
+  which are stored as English *data* — `t()` can never match them because the numbers are
+  baked in. Fixing that means storing the parts and composing at display time.
 - **The schedule data has no provenance.** `recommendations.js` says "Ford Taurus owner
   manual" but nothing records where those numbers came from. The app's entire value rests
   on that table.
