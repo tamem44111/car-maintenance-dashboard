@@ -167,9 +167,9 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
   Expenses. Also **auto-generated reminder notes** ("Auto: next Air Filter at 437,881 km"),
   which are stored as English *data* — `t()` can never match them because the numbers are
   baked in. Fixing that means storing the parts and composing at display time.
-- **The schedule data has no provenance.** `recommendations.js` says "Ford Taurus owner
-  manual" but nothing records where those numbers came from. The app's entire value rests
-  on that table.
+- **The schedule data is wrong, and now verifiably so.** See "Verified Ford intervals"
+  below. Left in place deliberately until the rebuild; the owner is aware and knows which
+  warnings to ignore.
 
 **The owner's own data:**
 
@@ -182,6 +182,61 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
 - Tyre DOT date not set, and no tyre fitting record, so wear and age tracking are idle.
 - Fuel logging unused after a year. Cost-per-km now uses an estimate instead (11 L/100km
   at 2.33 SAR), but the tank-by-tank page and the consumption anomaly warning stay dormant.
+
+## Verified Ford intervals — 2013 Taurus
+
+Checked 23 Aug 2026 against the actual owner's manual:
+`https://www.fordservicecontent.com/Ford_Content/catalog/owner_guides/13tauom3e.pdf`
+(local copy: `~/Downloads/taurus-2013-owner-manual.pdf`, 547 pages).
+
+**The table in `recommendations.js` does not match it.** Every figure below is quoted from
+the manual with its page number. The code was left unchanged by the owner's decision — the
+rebuild inherits these numbers instead.
+
+### Normal Scheduled Maintenance (p. 382–383)
+
+| Item | Ford | `recommendations.js` | Error |
+|---|---|---|---|
+| Spark plugs | 100,000 mi / **160,000 km** | 48,000 km | 3.3x too short |
+| Engine air filter | 30,000 mi / **48,000 km** | 15,000 km | 3.2x too short |
+| Cabin air filter | 20,000 mi / **32,000 km** | 15,000 km (universal) | 2.1x too short |
+| Automatic transmission fluid + filter | 150,000 mi / **240,000 km** | 60,000 km | 4x too short |
+| Engine coolant | initial 6 yr or 160,000 km, **then 3 yr or 80,000 km** | 50,000 km / 36 mo | 1.6x too short |
+| Accessory drive belt | inspect at 160,000 km, replace by 240,000 km | *absent* | missing |
+| Battery | **not a scheduled item** | 80,000 km / 48 mo | invented |
+| Brake inspection | **at every oil change** | 20,000 km / 12 mo | too *relaxed* |
+| Tyre rotation | at every oil change | 12,000 km / 6 mo | acceptable |
+
+Note the direction of the brake row. Every other error nags too early; on brakes — the one
+that matters at speed — the app is less cautious than Ford.
+
+### Oil: there is no fixed interval (p. 381)
+
+Ford uses the Intelligent Oil-Life Monitor. The manual gives a guideline table only:
+
+| Use | Interval |
+|---|---|
+| Normal — highway commuting, no towing, no extended idling | 7,500–10,000 mi / **12,000–16,000 km** |
+| Severe — heavy load, mountainous, extended idling, **extended hot operation** | 5,000–7,499 mi / **8,000–12,000 km** |
+| Extreme — maximum load, extreme hot or cold | 3,000–4,999 mi / **4,000–8,000 km** |
+
+Hard cap: *"Do not exceed one year or 10000 miles (16000 kilometers) between service
+intervals."* The owner's actual average of 4,086 km sits below even the Extreme band.
+
+### Severity is per-item, not global (p. 387–388)
+
+`autocare_climate` shortens **all fourteen** intervals by 20%. Ford does not work that way.
+It names conditions and adjusts *particular* items, and applies them only if you drive
+*primarily* in that condition — occasional exposure explicitly does not count:
+
+- **Towing**: transmission fluid every 48,000 km
+- **Extensive idling / low-speed commercial** (taxi, delivery, livery): spark plugs
+  96,000 km, transmission 48,000 km, filters inspect frequently
+- **Dusty or sandy, unpaved roads**: oil and tyre rotation every 8,000 km, wheels inspected
+  every 8,000 km, transmission 48,000 km, filters inspect frequently
+
+Long steady intercity highway running is the *gentlest* case in the manual — the opposite
+of the commercial category — so a blanket multiplier is wrong in both directions at once.
 
 ## Commercial assessment
 
