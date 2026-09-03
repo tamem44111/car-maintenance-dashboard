@@ -941,10 +941,10 @@ const Features = {
         items.sort((a, b) => a.priority - b.priority);
 
         if (!items.length) {
-            el.innerHTML = `<div class="action-center-card all-clear">
-                <div class="ac-clear-icon"><svg width="28" height="28" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="var(--green)" stroke-width="2"/><path d="M8 12l3 3 5-6" stroke="var(--green)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/></svg></div>
-                <div><div class="ac-clear-title">${t("All caught up")}</div><div class="ac-clear-sub">${t("No maintenance, documents, or alerts need attention right now.")}</div></div>
-            </div>`;
+            el.innerHTML = `<div class="nd-list"><div class="nd-row nd-ok">
+                <span class="nd-bar" aria-hidden="true"></span>
+                <div class="nd-body"><div class="nd-title">${t("All caught up")}</div><div class="nd-sub">${t("No maintenance, documents, or alerts need attention right now.")}</div></div>
+            </div></div>`;
             return;
         }
 
@@ -958,18 +958,22 @@ const Features = {
             gauge: '<path d="M4 18a9 9 0 1116 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/><path d="M12 14l4-4" stroke="currentColor" stroke-width="2" stroke-linecap="round"/><circle cx="12" cy="14" r="1.6" fill="currentColor"/>',
             save: '<path d="M5 3h11l3 3v15H5z" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/><path d="M8 3v6h7V3M8 21v-6h8v6" stroke="currentColor" stroke-width="2" fill="none" stroke-linejoin="round"/>'
         };
-        const pClass = ['ac-critical', 'ac-warning', 'ac-info'];
+        // Severity is carried by a left rule and by position in the list, so colour is
+        // never the only signal. No icon tile, no all-caps eyebrow, no shadow per row.
+        // priority 2 is "worth knowing", not "healthy" — green would read as fine,
+        // and six unrecorded services are the opposite of fine.
+        const pClass = ['nd-crit', 'nd-warn', 'nd-unknown'];
         const shown = items.slice(0, 6);
-        el.innerHTML = `<div class="action-center-card">
-            <div class="ac-header"><span class="ac-title">${t("Action Center")}</span><span class="ac-count">${items.length > 1 ? t('{n} items', {n: items.length}) : t('{n} item', {n: items.length})}</span></div>
-            <div class="ac-list">${shown.map(it => `
-                <div class="ac-item ${pClass[it.priority]}">
-                    <span class="ac-icon"><svg viewBox="0 0 24 24" width="18" height="18">${icons[it.icon]}</svg></span>
-                    <div class="ac-text"><div class="ac-item-title">${it.title}</div><div class="ac-item-sub">${it.sub}</div></div>
-                    ${it.action ? `<button class="btn btn-sm btn-secondary ac-btn" onclick="${it.action.fn}">${it.action.label}</button>` : ''}
+        el.innerHTML = `<div class="nd-list">
+            <div class="nd-head"><h3>${t("Needs attention")}</h3><span class="nd-head-meta">${
+                items.length > 1 ? t('{n} items', {n: items.length}) : t('{n} item', {n: items.length})}</span></div>
+            ${shown.map(it => `
+                <div class="nd-row ${pClass[it.priority]}">
+                    <span class="nd-bar" aria-hidden="true"></span>
+                    <div class="nd-body"><div class="nd-title">${it.title}</div><div class="nd-sub">${it.sub}</div></div>
+                    ${it.action ? `<button type="button" class="nd-act" onclick="${it.action.fn}">${it.action.label}</button>` : ''}
                 </div>`).join('')}
-                ${items.length > 6 ? `<div class="ac-more">${t('+ {n} more', {n: items.length - 6})}</div>` : ''}
-            </div>
+            ${items.length > 6 ? `<div class="nd-row"><div class="nd-sub">${t('+ {n} more', {n: items.length - 6})}</div></div>` : ''}
         </div>`;
     },
 

@@ -543,7 +543,49 @@ const App = {
     },
 
     // ── Render: Dashboard ──
+    // ── Dashboard, new direction ──────────────────────────────────────────
+    // The odometer leads because every due date, projection and cost in this app
+    // is derived from it, and it was previously buried inside a car card. The four
+    // stat tiles it replaces counted cars and services — numbers nobody acts on.
+    _renderNewDashboard() {
+        const el = document.getElementById('nd-dash');
+        if (!el) return;
+        const cid = this.selectedCarId;
+        const cars = Storage.getCars().filter(c => cid === 'all' || c.id === cid);
+        if (!cars.length) { el.innerHTML = ''; return; }
+        const car = cars[0];
+        const proj = Storage.getProjectedMileage(car);
+        const fresh = Storage.getOdometerFreshness(car);
+
+        let html = `<div class="odo-hero">
+            <div class="odo-hero-top">
+                <div class="odo-figure"><span class="odo-reading">${(proj.km || 0).toLocaleString()}</span><span class="odo-unit">km</span></div>
+                <div class="odo-car">${car.make} ${car.model}<span>${car.year}</span></div>
+            </div>
+            <div class="odo-est">${proj.estimated
+                ? t('Estimated. Last read {km} km on {d}, {n} days ago at about {r} km a day.', {
+                    km: proj.lastKm.toLocaleString(), d: proj.lastDate,
+                    n: proj.daysSince, r: Math.round(proj.rate || 0) })
+                : t('Confirmed reading from {d}.', { d: proj.lastDate || '—' })}</div>
+            <button type="button" class="odo-update" onclick="Features.openOdometerModal('${car.id}')">${
+                fresh.stale || fresh.never ? t('Update the odometer') : t('Enter a new reading')}</button>
+        </div>`;
+
+        // Running cost, one figure with its parts under it
+        const bd = Storage.getCostBreakdown(car.id);
+        if (bd) {
+            html += `<div class="nd-list"><div class="nd-cost">
+                <span class="nd-cost-value">${bd.totalPerKm.toFixed(2)}</span>
+                <span class="nd-cost-unit">${t('SAR/km')}</span></div>
+                <div class="nd-cost-parts">${t('Maintenance')} ${bd.maintPerKm.toFixed(2)} &middot; ${
+                    bd.fuelEstimated ? t('Fuel (est.)') : t('Fuel')} ${bd.fuelPerKm.toFixed(2)} &middot; ${
+                    t('over {km} km', { km: bd.km.toLocaleString() })}</div></div>`;
+        }
+        el.innerHTML = html;
+    },
+
     renderDashboard() {
+        this._renderNewDashboard();
         const cid=this.selectedCarId, cars=Storage.getCars(), services=Storage.getServices(cid), reminders=Storage.getUpcomingReminders(cid), total=Storage.getTotalExpenses(cid);
         document.getElementById('stat-cars').textContent=cars.length;
         document.getElementById('stat-services').textContent=services.length;
@@ -771,16 +813,30 @@ const App = {
     // ── Render: Expenses ──
     renderExpenses() {
         const cid=this.selectedCarId, services=Storage.getServices(cid).sort((a,b)=>new Date(b.date)-new Date(a.date)), cars=Storage.getCars();
-        const svcTotal=Storage.getServiceExpenses(cid), fuelTotal=Storage.getFuelExpenses(cid), grandTotal=svcTotal+fuelTotal;
+        // Use the same breakdown every other screen uses. Reading logged fuel here
+        // while cost-per-km reads the estimate is how this page came to show
+        // "Fuel 0 SAR" beside a car card claiming 0.26 SAR/km of fuel.
+        const bd=Storage.getCostBreakdown(cid);
+        const svcTotal=Storage.getServiceExpenses(cid)+Storage.getFuelExpenses(cid);
+        const fuelTotal=bd?bd.fuel:Storage.getFuelExpenses(cid);
+        const fuelEstimated=!!(bd&&bd.fuelEstimated);
+        const grandTotal=svcTotal+fuelTotal;
         const monthlyData={};
         services.forEach(s=>{const m=s.date?s.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+Storage.getServiceCost(s);});
         Storage.getFuelLogs(cid).forEach(f=>{const m=f.date?f.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+(parseFloat(f.totalCost)||0);});
         const months=Object.keys(monthlyData).sort().slice(-6), maxVal=Math.max(...months.map(m=>monthlyData[m]),1);
 
+        // Total is the sum of the two beneath it, so showing all three side by side
+        // just repeated a number. Total leads; its parts sit under it.
         document.getElementById('expenses-summary').innerHTML=`
-            <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${grandTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Total Spent")}</span></div></div>
-            <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M14.7 6.3a1 1 0 000 1.4l1.6 1.6a1 1 0 001.4 0l3-3a5 5 0 01-7 7l-7.4 7.4a2.1 2.1 0 01-3-3L10.7 10.3a5 5 0 017-7l-3 3z" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${svcTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Maintenance")}</span></div></div>
-            <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${fuelTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Fuel")}</span></div></div>`;
+            <div class="spend-summary">
+                <div class="spend-total"><span class="spend-total-value">${grandTotal.toFixed(0)} <small>SAR</small></span><span class="spend-total-label">${t("Total Spent")}</span></div>
+                <div class="spend-parts">
+                    <div class="spend-part"><span class="spend-part-label">${t("Maintenance")}</span><span class="spend-part-value">${svcTotal.toFixed(0)}</span></div>
+                    <div class="spend-part"><span class="spend-part-label">${fuelEstimated?t("Fuel (est.)"):t("Fuel")}</span><span class="spend-part-value">${fuelTotal.toFixed(0)}</span></div>
+                </div>
+                ${fuelEstimated?`<div class="spend-note">${t("Fuel is estimated from your consumption setting, not from logged fill-ups.")}</div>`:''}
+            </div>`;
 
         if(typeof Features!=='undefined') Features.renderServiceInsights(cid);
         const el=document.getElementById('expenses-list');
