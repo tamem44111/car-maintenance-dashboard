@@ -572,6 +572,14 @@ const Storage = {
     // Distance covered by the records we hold, used as the divisor for every
     // per-km figure. Null when there is not enough history to divide by.
     getTrackedKm(carId) {
+        // "all" is a real selector value, not a car id. Looking it up returned
+        // undefined, so every per-km figure silently fell back to zero whenever no
+        // single car was chosen — which is the default with one car.
+        if (!carId || carId === 'all') {
+            const spans = this.getCars().map(c => this.getTrackedKm(c.id)).filter(v => v > 0);
+            if (!spans.length) return null;
+            return spans.reduce((a, b) => a + b, 0);
+        }
         const car = this.getCars().find(c => c.id === carId);
         if (!car) return null;
         const readings = this.getOdometerReadings(carId).map(r => r.km).filter(m => m > 0);
@@ -587,7 +595,10 @@ const Storage = {
         const span = this.getTrackedKm(carId);
         if (!span) return null;
         const maintenance = this.getServiceExpenses(carId) + this.getFuelExpenses(carId);
-        const est = (typeof Features !== 'undefined') ? Features.getFuelEstimateFor(carId, span) : null;
+        // The estimate needs a car to read a driving rate from; across "all" use the
+        // first, since the consumption setting is per-owner rather than per-car.
+        const rateCar = (!carId || carId === 'all') ? (this.getCars()[0] || {}).id : carId;
+        const est = (typeof Features !== 'undefined') ? Features.getFuelEstimateFor(rateCar, span) : null;
         const fuel = est ? est.cost : 0;
         return {
             km: span,

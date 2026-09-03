@@ -841,7 +841,7 @@ const App = {
         if(typeof Features!=='undefined') Features.renderServiceInsights(cid);
         const el=document.getElementById('expenses-list');
         let chartHTML='';
-        if(months.length>0) chartHTML=`<div class="chart-container"><h3>${t("Monthly Expenses")}</h3><div class="bar-chart">${months.map(m=>{const pct=(monthlyData[m]/maxVal)*100;return `<div class="bar-group"><span class="bar-value">${monthlyData[m].toFixed(0)}</span><div class="bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${m.substring(5)}</span></div>`;}).join('')}</div></div>`;
+        if(months.length>0) chartHTML=`<div class="chart-container"><h3>${t("Monthly Expenses")}</h3><div class="bar-chart">${months.map(m=>{const pct=(monthlyData[m]/maxVal)*100;const peak=monthlyData[m]===maxVal;return `<div class="bar-group${peak?' is-peak':''}" tabindex="0" title="${m} — ${monthlyData[m].toFixed(0)} SAR"><span class="bar-value">${monthlyData[m].toFixed(0)}</span><div class="bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${m.substring(5)}</span></div>`;}).join('')}</div></div>`;
 
         const allExpenses=[
             ...services.map(s=>({date:s.date,carId:s.carId,desc:I18N.t(s.type)+((s.bills&&s.bills.length)?` (${s.bills.length} bill${s.bills.length>1?'s':''})`:''),cost:Storage.getServiceCost(s),category:'Service'})),

@@ -1,4 +1,4 @@
-const CACHE = 'autocare-v33';
+const CACHE = 'autocare-v34';
 const ASSETS = ['./', './index.html', './styles.css', './i18n.js', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -14,13 +14,21 @@ self.addEventListener('activate', e => {
     );
 });
 
+// The typefaces come from Google Fonts, which is cross-origin, so the same-origin
+// test below skipped them and they were never cached. Offline — a highway with no
+// signal, which is this car's normal condition — the app silently lost its
+// typeface and fell back to system fonts. They are cacheable: Google serves them
+// with CORS.
+const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
+
 // Network-first: deploys show up immediately when online; cache keeps the app working offline.
 self.addEventListener('fetch', e => {
     if (e.request.method !== 'GET') return;
     e.respondWith(
         fetch(e.request)
             .then(res => {
-                if (res.ok && new URL(e.request.url).origin === location.origin) {
+                const u = new URL(e.request.url);
+                if (res.ok && (u.origin === location.origin || FONT_HOSTS.includes(u.hostname))) {
                     const copy = res.clone();
                     caches.open(CACHE).then(c => c.put(e.request, copy));
                 }

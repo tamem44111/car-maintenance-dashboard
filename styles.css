@@ -6,26 +6,26 @@
 
 :root {
     /* Primary */
-    --primary: #4f6ef7;
-    --primary-hover: #3b5de7;
-    --primary-light: #eef2ff;
-    --primary-glow: rgba(79, 110, 247, .15);
+    --primary: #14425C;          /* motorway-sign blue; never used for status */
+    --primary-hover: #0E3247;
+    --primary-light: #E4EDF2;
+    --primary-glow: rgba(20, 66, 92, .16);
 
     /* Surfaces */
-    --bg: #f4f6fb;
-    --bg2: #eaecf5;
+    --bg: #F0F0EC;               /* warm-grey paper, not the cream cliche */
+    --bg2: #E6E6E1;
     --card: #ffffff;
-    --card-hover: #fafbff;
+    --card-hover: #FAFAF7;
 
     /* Typography */
-    --text: #111827;
-    --text2: #4b5563;
-    --text3: #9ca3af;
+    --text: #16181A;
+    --text2: #5B6167;
+    --text3: #8B9198;
 
     /* Borders */
-    --border: #e5e7eb;
-    --border2: #f3f4f6;
-    --border-strong: #d1d5db;
+    --border: #DEDED8;
+    --border2: #EAEAE4;
+    --border-strong: #C8C8C0;
 
     /* Sidebar */
     --sidebar-bg: linear-gradient(180deg, #111827 0%, #1e293b 100%);
@@ -33,18 +33,18 @@
     --sidebar-active: #ffffff;
 
     /* Semantic */
-    --green: #059669;
+    --green: #1B7F4B;
     --green-bg: #ecfdf5;
     --green-border: #a7f3d0;
-    --orange: #d97706;
+    --orange: #B45309;
     --orange-bg: #fffbeb;
     --orange-border: #fde68a;
-    --red: #dc2626;
+    --red: #B42318;
     --red-bg: #fef2f2;
     --red-border: #fecaca;
-    --blue: #4f6ef7;
-    --blue-bg: #eef2ff;
-    --blue-border: #c7d2fe;
+    --blue: #14425C;
+    --blue-bg: #E4EDF2;
+    --blue-border: #BBCEDA;
 
     /* Shape */
     --radius: 16px;
@@ -52,10 +52,10 @@
     --radius-xs: 6px;
 
     /* Elevation */
-    --shadow-xs: 0 1px 2px rgba(0,0,0,.04);
-    --shadow: 0 1px 3px rgba(0,0,0,.04), 0 4px 6px rgba(0,0,0,.02);
-    --shadow-md: 0 4px 8px rgba(0,0,0,.04), 0 12px 24px rgba(0,0,0,.06);
-    --shadow-lg: 0 8px 16px rgba(0,0,0,.06), 0 24px 48px rgba(0,0,0,.08);
+    --shadow-xs: none;
+    --shadow: none;
+    --shadow-md: 0 1px 2px rgba(22,24,26,.05);
+    --shadow-lg: 0 8px 28px rgba(22,24,26,.12);
 
     /* Motion */
     --ease: cubic-bezier(.4, 0, .2, 1);
@@ -64,16 +64,16 @@
 }
 
 [data-theme="dark"] {
-    --bg: #0c1222;
-    --bg2: #151d30;
-    --card: #182136;
-    --card-hover: #1c2844;
-    --text: #f0f4f8;
-    --text2: #94a3b8;
-    --text3: #64748b;
-    --border: #253049;
-    --border2: #1e293b;
-    --border-strong: #334155;
+    --bg: #14161A;
+    --bg2: #1A1D22;
+    --card: #1C1F24;
+    --card-hover: #22262C;
+    --text: #ECEFF2;
+    --text2: #A3ABB4;
+    --text3: #79828C;
+    --border: #2B3037;
+    --border2: #23272D;
+    --border-strong: #3A4048;
     --sidebar-bg: linear-gradient(180deg, #070d1a 0%, #0c1222 100%);
     --primary-light: #1e2d5f;
     --primary-glow: rgba(79, 110, 247, .12);
@@ -468,14 +468,12 @@ body {
     border: 1px solid var(--border);
 }
 .card h3 {
-    font-size: 11px;
-    font-weight: 700;
+    font-size: 14px;
+    font-weight: 600;
     margin-bottom: 16px;
     padding-bottom: 12px;
     border-bottom: 1px solid var(--border);
-    color: var(--text3);
-    text-transform: uppercase;
-    letter-spacing: .8px;
+    color: var(--text);
 }
 .card-body { min-height: 60px; }
 .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -528,10 +526,10 @@ body {
     border-top: 1px solid var(--border);
 }
 .car-recs-title {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .8px;
+    font-size: 13px;
+    font-weight: 600;
+    
+    
     color: var(--text3);
     margin-bottom: 10px;
 }
@@ -812,12 +810,10 @@ tr:hover td { background: var(--card-hover); }
     margin-bottom: 16px;
 }
 .chart-container h3 {
-    font-size: 11px;
-    font-weight: 700;
-    color: var(--text3);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text);
     margin-bottom: 16px;
-    text-transform: uppercase;
-    letter-spacing: .8px;
 }
 .bar-chart {
     display: flex;
@@ -834,12 +830,15 @@ tr:hover td { background: var(--card-hover); }
     height: 100%;
     justify-content: flex-end;
 }
+/* Thin mark, 4px rounded data-end, square where it meets the baseline. The
+   gradient was decoration: a bar's job is length, and a fill that changes value
+   down its own height fights that. */
 .bar {
     width: 100%;
-    max-width: 44px;
-    background: linear-gradient(180deg, var(--primary) 0%, #3b5de7 100%);
-    border-radius: 8px 8px 2px 2px;
-    min-height: 4px;
+    max-width: 34px;
+    background: var(--primary);
+    border-radius: 4px 4px 0 0;
+    min-height: 3px;
     transition: height .5s var(--ease);
 }
 .bar-label {
@@ -848,15 +847,22 @@ tr:hover td { background: var(--card-hover); }
     font-weight: 500;
     color: var(--text3);
 }
+/* A number on every bar is noise — the eye reads length, and the labels collided.
+   Only the tallest keeps its value; the rest are available on hover. */
 .bar-value {
     font-size: 11px;
-    font-weight: 700;
-    margin-bottom: 4px;
-    color: var(--text2);
+    font-weight: 600;
+    margin-bottom: 5px;
+    color: var(--text3);
+    font-variant-numeric: tabular-nums;
+    visibility: hidden;
 }
-.bar.fuel-bar {
-    background: linear-gradient(180deg, var(--green) 0%, #047857 100%);
-}
+.bar-group.is-peak .bar-value,
+.bar-group:hover .bar-value,
+.bar-group:focus-within .bar-value { visibility: visible; }
+/* A baseline, so the bars sit on something rather than floating */
+.bar-chart { border-bottom: 1px solid var(--border); }
+.bar.fuel-bar { background: var(--green); }
 
 
 /* ══════════════════════════════════════════════════
@@ -995,10 +1001,10 @@ tr:hover td { background: var(--card-hover); }
     border-top: 1px solid var(--border);
 }
 .tire-info-title {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .8px;
+    font-size: 13px;
+    font-weight: 600;
+    
+    
     color: var(--text3);
     margin-bottom: 8px;
 }
@@ -1204,10 +1210,10 @@ tr:hover td { background: var(--card-hover); }
 }
 .odo-block-main { flex: 1; min-width: 0; }
 .odo-block-label {
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: .8px;
+    font-size: 13px;
+    font-weight: 600;
+    
+    
     color: var(--text3);
 }
 .odo-badge {
@@ -1304,8 +1310,7 @@ tr:hover td { background: var(--card-hover); }
 }
 .bills-head { display: flex; align-items: center; justify-content: space-between; }
 .bills-title {
-    font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .8px; color: var(--text3);
+    font-size: 14px; font-weight: 600; text-transform: uppercase; color: var(--text);
 }
 .bills-hint { font-size: 11px; color: var(--text3); margin: 8px 0 12px; line-height: 1.45; }
 .bill-row {
@@ -1378,8 +1383,8 @@ tr:hover td { background: var(--card-hover); }
    WARRANTY CENTER
    ══════════════════════════════════════════════════ */
 .warranty-section-title {
-    font-size: 11px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .8px; color: var(--text3);
+    font-size: 13px; font-weight: 600; 
+     color: var(--text3);
     margin: 4px 0 14px;
 }
 .warranty-section-muted { margin-top: 28px; opacity: .75; }
@@ -1439,7 +1444,10 @@ tr:hover td { background: var(--card-hover); }
     overflow: hidden;
 }
 .insight-bar-fill { height: 100%; border-radius: 20px; transition: width .6s var(--ease); }
-.insight-bar-fill.frequent { background: var(--blue); }
+/* "More often than the schedule asks" is a state, not a brand moment. It used the
+   accent, which made the brand colour stand in for a status. Neutral ink says
+   "noted, not wrong" — which is exactly what servicing early is. */
+.insight-bar-fill.frequent { background: var(--text3); }
 .insight-bar-fill.onschedule { background: var(--green); }
 .insight-bar-fill.stretched { background: var(--orange); }
 /* the 100% mark = the recommended interval */
@@ -1563,8 +1571,8 @@ tr:hover td { background: var(--card-hover); }
 .own-block.own-consider { border-left-color: var(--red); }
 .own-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 12px; }
 .own-title {
-    font-size: 10px; font-weight: 700; text-transform: uppercase;
-    letter-spacing: .8px; color: var(--text3);
+    font-size: 13px; font-weight: 600; 
+     color: var(--text3);
 }
 .own-stats { display: flex; gap: 10px; }
 .own-stat { flex: 1; text-align: center; }
@@ -2054,7 +2062,7 @@ tr:hover td { background: var(--card-hover); }
    change; see Recommendations.GROUPS. */
 .svc-picker { display: flex; flex-direction: column; gap: 14px; }
 .svc-group-head, .svc-due-head {
-    font-size: 11px; font-weight: 600; letter-spacing: .07em; text-transform: uppercase;
+    font-size: 13px; font-weight: 600;  
     color: var(--text3); margin-bottom: 9px;
 }
 .svc-due {
