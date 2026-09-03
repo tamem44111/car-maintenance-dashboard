@@ -575,11 +575,9 @@ th, td {
 }
 th {
     background: var(--bg);
-    font-weight: 700;
-    color: var(--text3);
-    font-size: 10.5px;
-    text-transform: uppercase;
-    letter-spacing: .8px;
+    font-weight: 600;
+    color: var(--text2);
+    font-size: 12.5px;
     border-bottom: 1px solid var(--border);
 }
 td { border-bottom: 1px solid var(--border2); }
@@ -1643,10 +1641,8 @@ tr:hover td { background: var(--card-hover); }
     .table-container td::before {
         content: attr(data-label);
         flex-shrink: 0;
-        font-size: 10.5px;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: .6px;
+        font-size: 12.5px;
+        font-weight: 400;
         color: var(--text3);
         text-align: left;
     }
@@ -1664,6 +1660,20 @@ tr:hover td { background: var(--card-hover); }
         justify-content: center;
         padding: 9px 12px;
         font-size: 12.5px;
+    }
+    /* Delete was a filled red block on every row, which made the destructive
+       action the loudest thing on a page of records you mostly came to read.
+       It stays reachable and still reads as dangerous, but stops shouting. */
+    .table-container td.row-actions .btn-danger {
+        flex: 0 0 auto;
+        background: transparent;
+        color: var(--red);
+        border: 1px solid var(--border);
+        box-shadow: none;
+    }
+    .table-container td.row-actions .btn-danger:hover {
+        background: var(--red-bg);
+        border-color: var(--red-border);
     }
 }
 
@@ -1998,8 +2008,7 @@ tr:hover td { background: var(--card-hover); }
 }
 .docs-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;margin-bottom:12px}
 .docs-title{
-    font-size:11px;font-weight:700;text-transform:uppercase;
-    letter-spacing:.8px;color:var(--text3);
+    font-size:14px;font-weight:600;color:var(--text);
 }
 .docs-car{font-size:12px;color:var(--text3)}
 .docs-list{display:flex;flex-direction:column}

@@ -790,11 +790,20 @@ const App = {
         const avgConsumption=consumption&&consumption.length?((consumption.reduce((s,c)=>s+parseFloat(c.lPer100km),0)/consumption.length).toFixed(1)):'-';
         const avgCostKm=consumption&&consumption.length?((consumption.reduce((s,c)=>s+parseFloat(c.costPerKm),0)/consumption.length).toFixed(2)):'-';
 
+        // Same shape as Expenses: the figure that matters leads, its supporting
+        // numbers sit under it. Four equal tiles gave a litre count the same weight
+        // as the cost per km, and gave no answer at all when nothing was logged.
+        const noLogs = !logs.length;
         document.getElementById('fuel-summary').innerHTML=`
-            <div class="stat-card"><div class="stat-icon green"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M3 22V6a2 2 0 012-2h6a2 2 0 012 2v16" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${fuelTotal.toFixed(0)} SAR</span><span class="stat-label">${t("Total Fuel Cost")}</span></div></div>
-            <div class="stat-card"><div class="stat-icon blue"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 2v20M2 12h20" stroke="currentColor" stroke-width="2"/></svg></div><div class="stat-info"><span class="stat-value">${totalLiters.toFixed(0)} L</span><span class="stat-label">${t("Total Liters")}</span></div></div>
-            <div class="stat-card"><div class="stat-icon orange"><svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${avgConsumption} L/100km</span><span class="stat-label">${t("Avg Consumption")}</span></div></div>
-            <div class="stat-card"><div class="stat-icon red"><svg viewBox="0 0 24 24" width="22" height="22"><path d="M12 1v22M17 5H9.5a3.5 3.5 0 000 7h5a3.5 3.5 0 010 7H6" stroke="currentColor" stroke-width="2" fill="none"/></svg></div><div class="stat-info"><span class="stat-value">${avgCostKm} SAR/km</span><span class="stat-label">${t("Cost per km")}</span></div></div>`;
+            <div class="spend-summary">
+                <div class="spend-total"><span class="spend-total-value">${fuelTotal.toFixed(0)} <small>SAR</small></span><span class="spend-total-label">${t("Total Fuel Cost")}</span></div>
+                <div class="spend-parts">
+                    <div class="spend-part"><span class="spend-part-label">${t("Total Liters")}</span><span class="spend-part-value">${totalLiters.toFixed(0)} L</span></div>
+                    <div class="spend-part"><span class="spend-part-label">${t("Avg Consumption")}</span><span class="spend-part-value">${avgConsumption}</span></div>
+                    <div class="spend-part"><span class="spend-part-label">${t("Cost per km")}</span><span class="spend-part-value">${avgCostKm}</span></div>
+                </div>
+                ${noLogs ? `<div class="spend-note">${t("Nothing logged here yet. Your running cost still uses the consumption estimate in Settings.")}</div>` : ''}
+            </div>`;
 
         // Chart
         const chartEl=document.getElementById('fuel-chart');
