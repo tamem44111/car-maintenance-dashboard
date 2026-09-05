@@ -244,6 +244,8 @@ const App = {
                 <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" max="${new Date().toISOString().split('T')[0]}" value="${service?service.date:new Date().toISOString().split('T')[0]}" onchange="App._toggleServiceExtras()"></div>
                 <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
+            <label class="check-only"><input type="checkbox" id="f-checkonly" ${service&&service.checkOnly?'checked':''} onchange="App._paintCheckOnly()"> ${t('Checked only \u2014 nothing was replaced')}</label>
+            <div id="check-only-note" class="field-note" style="display:none"></div>
             <div id="inspection-options" style="display:none">
                 <div class="form-row">
                     <div class="form-group"><label>${t('Result')}</label>
@@ -286,10 +288,13 @@ const App = {
                 const editType=document.getElementById('f-type').value;
                 const dupe=Storage.findDuplicateService({carId,type:editType,date,mileage},service.id);
                 if(dupe && !confirm(`Another ${editType} record already exists for this car on ${date} at the same mileage.\n\nSave anyway?`)) return;
-                const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness,
+                const checkOnly=!!(document.getElementById('f-checkonly')||{}).checked;
+                const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness,checkOnly,
                     ...(Recommendations.isInspectionType(editType)?insp:{})};
-                if(data.type==='Oil Change') this._handleOilReminder(data);
-                else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date);
+                if(!checkOnly){
+                    if(data.type==='Oil Change') this._handleOilReminder(data);
+                    else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date);
+                }
                 Storage.updateService(service.id,data);
             } else {
                 // A due type appears twice — in the pinned row and in its group — so the
@@ -311,11 +316,14 @@ const App = {
                 if(selected.includes('Timing Belt')&&car&&!car.timingType) Storage.updateCar(carId,{timingType:'belt'});
                 selected.forEach((type,i)=>{
                     const data={carId,type,date,mileage,notes,padThickness,
+                        checkOnly: !!(document.getElementById('f-checkonly')||{}).checked,
                         cost: bills.length ? (i===0?cost:'0') : cps,
                         bills: (bills.length&&i===0) ? bills : [],
                         ...(Recommendations.isInspectionType(type)?insp:{})};
-                    if(type==='Oil Change') this._handleOilReminder(data);
-                    else if(mileage&&car) Recommendations.createReminderFromService(car,type,mileage,date);
+                    if(!data.checkOnly){
+                        if(type==='Oil Change') this._handleOilReminder(data);
+                        else if(mileage&&car) Recommendations.createReminderFromService(car,type,mileage,date);
+                    }
                     Storage.addService(data);
                 });
             }
@@ -325,7 +333,7 @@ const App = {
         });
         // Lock/unlock the cost field to match whether bills are present, and
         // label where the pre-filled odometer came from
-        setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); this._toggleServiceExtras(); }, 40);
+        setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); this._toggleServiceExtras(); this._paintCheckOnly(); }, 40);
     },
 
     // A logged inspection is the authority on when the certificate expires, so it
@@ -380,6 +388,16 @@ const App = {
         box.innerHTML = '';
         // Keep suggesting a year out until the owner types their own date
         if (exp && exp.dataset.auto === '1') exp.value = Features.certificateExpiry(date) || '';
+    },
+
+    // Saying plainly what the toggle changes, because it decides whether the
+    // schedule treats this as the job being done.
+    _paintCheckOnly() {
+        const box = document.getElementById('f-checkonly');
+        const note = document.getElementById('check-only-note');
+        if (!box || !note) return;
+        note.style.display = box.checked ? 'block' : 'none';
+        if (box.checked) note.textContent = t('Kept as a record and any measurement still counts, but the schedule will not treat this as the work being done.');
     },
 
     // Show the oil-interval / brake-pad extras only for the service types they belong to

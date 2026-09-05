@@ -170,8 +170,8 @@ const Storage = {
         data.services.push(service);
         this.save(data);
         this._syncOdometer(service.carId, service.mileage, service.date);
-        // Actually doing the job ends any postponement of it
-        this.clearSnooze(service.carId, service.type);
+        // Actually doing the job ends any postponement of it. Merely checking does not.
+        if (!service.checkOnly) this.clearSnooze(service.carId, service.type);
         return service;
     },
 
@@ -970,7 +970,7 @@ const Storage = {
         if (!car) return null;
         const rec = car.tires || {};
         const svc = this.getServices(car.id)
-            .filter(s => s.type === 'Tires' && s.date)
+            .filter(s => s.type === 'Tires' && s.date && !s.checkOnly)
             .sort((a, b) => new Date(b.date) - new Date(a.date))[0];
 
         let fittedDate = rec.installedDate || null;

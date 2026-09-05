@@ -35,6 +35,14 @@ user's history. Same rule applies to bill kinds and document labels.
 out first (`Recommendations.getMaintenanceStatus`). Km thresholds are also converted to a predicted date
 using the driving rate, so a km-based item can drive a calendar reminder.
 
+**Checking something is not doing it.** A record can be marked `checkOnly`, and then it is
+kept as history with any measurement intact, but `getMaintenanceStatus` skips it when
+looking for the last service, `getTyreStatus` does not treat it as a new set, no "next one
+due" reminder is created, and a postponement of that item still stands. Without it the only
+way to record a brake-pad measurement was to file a pad replacement, which reset a 40,000
+km interval for work nobody did — the same trap that turned "change next oil service" into
+a completed spark plug job.
+
 **Nothing may be dated in the future.** `logOdometer` refuses a future reading and
 `addService` pulls a future service date back to today, because either one silently
 corrupts the schedule: a reading dated tomorrow becomes the car's current mileage, and a

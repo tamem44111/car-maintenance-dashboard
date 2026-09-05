@@ -259,8 +259,10 @@ const Recommendations = {
         if (!rec || !rec.km) return null;
 
         const currentKm = Storage.getEffectiveMileage(car);
+        // A record marked "checked only" is an observation, not the job being done.
+        // Counting it would reset the interval for work nobody performed.
         const services = Storage.getServices(car.id)
-            .filter(s => s.type === type)
+            .filter(s => s.type === type && !s.checkOnly)
             .sort((a, b) => new Date(b.date) - new Date(a.date));
         const last = services[0];
         const months = rec.months || 12;

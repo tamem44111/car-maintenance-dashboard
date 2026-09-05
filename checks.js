@@ -273,6 +273,35 @@ const Checks = {
         A.W.localStorage.setItem('autocare_climate', 'normal');
         this.seed(A.W);
 
+        // -- a check is an observation, not the job being done --
+        const padBefore = Recommendations.getMaintenanceStatus(car, 'Rear Brake Pads');
+        Storage.addService({ carId: 'test-car', type: 'Rear Brake Pads', date: day(0),
+            cost: '', mileage: '', padThickness: '5', checkOnly: true });
+        const padAfter = Recommendations.getMaintenanceStatus(Storage.getCars()[0], 'Rear Brake Pads');
+        this.eq('a checked-only record does not reset the schedule', padAfter.lastServiced, padBefore.lastServiced);
+        this.eq('and the status is unchanged', padAfter.detail, padBefore.detail);
+        this.ok('but the measurement is still stored',
+            Storage.getServices('test-car').some(s => s.padThickness === '5' && s.checkOnly));
+
+        // an actual replacement still counts
+        Storage.addService({ carId: 'test-car', type: 'Rear Brake Pads', date: day(0), cost: '400', mileage: '' });
+        this.eq('a real replacement does reset it',
+            Recommendations.getMaintenanceStatus(Storage.getCars()[0], 'Rear Brake Pads').lastServiced, day(0));
+        this.seed(A.W);
+
+        // checking a tyre set does not make it a new set
+        Storage.updateCar('test-car', { tires: { installedDate: day(300), installedMileage: '55000' } });
+        const tyreBefore = Storage.getTyreStatus(Storage.getCars()[0]).kmOnSet;
+        Storage.addService({ carId: 'test-car', type: 'Tires', date: day(0), mileage: '100000', cost: '', checkOnly: true });
+        this.eq('checking the tyres does not reset the set',
+            Storage.getTyreStatus(Storage.getCars()[0]).kmOnSet, tyreBefore);
+
+        // and checking something does not clear a postponement of it
+        Storage.snoozeItem('test-car', 'Tires', 30);
+        Storage.addService({ carId: 'test-car', type: 'Tires', date: day(0), mileage: '', cost: '', checkOnly: true });
+        this.ok('a check leaves a postponement standing', !!Storage.getSnooze('test-car', 'Tires'));
+        this.seed(A.W);
+
         // -- nothing may be dated in the future --
         // A reading dated tomorrow becomes the car's current mileage; a service dated
         // next year resets its own schedule from a date that has not happened.

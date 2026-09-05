@@ -2244,3 +2244,8 @@ tr:hover td { background: var(--card-hover); }
 
 /* Said only when it would move a due date, so it stays meaningful. */
 .odo-trend { color: var(--orange); font-weight: 600; }
+
+/* "Checked only" — an observation rather than the job being done. */
+.check-only { display: flex; align-items: center; gap: 9px; margin: 4px 0 6px;
+              font-size: 13.5px; color: var(--text2); cursor: pointer; }
+.check-only input { width: auto; margin: 0; flex: none; }
