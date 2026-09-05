@@ -282,15 +282,59 @@ const Storage = {
         return null;
     },
 
-    // Average km/day derived from the spread of readings (null when not enough data)
-    getDailyKmRate(carId) {
-        const readings = this.getOdometerReadings(carId);
-        if (readings.length < 2) return null;
-        const first = readings[0], last = readings[readings.length - 1];
-        const days = (new Date(last.date) - new Date(first.date)) / 86400000;
-        const km = last.km - first.km;
+    // How recent a stretch counts as "how you drive now", and how much of it is
+    // needed before that stretch is trusted over the lifetime figure.
+    RECENT_WINDOW_DAYS: 120,
+    RECENT_MIN_SPAN_DAYS: 21,
+    RECENT_MIN_KM: 500,
+
+    _rateBetween(a, b) {
+        const days = (new Date(b.date) - new Date(a.date)) / 86400000;
+        const km = b.km - a.km;
         if (days < 1 || km <= 0) return null;
         return km / days;
+    },
+
+    // Average km/day. Prefers how the car is being driven *now* over its lifetime
+    // average, because the lifetime figure is what every due date is projected
+    // against and it lags badly when driving picks up: this car's own readings gave
+    // 93 km/day across fifteen months while the last five weeks ran at 121, which
+    // put every km-based date about 30% late.
+    //
+    // A recent window is only trusted when it is long enough and far enough to mean
+    // something; otherwise the full span still answers, so a single fresh reading
+    // can never swing the estimate.
+    getDailyKmRate(carId, opts) {
+        const readings = this.getOdometerReadings(carId);
+        if (readings.length < 2) return null;
+        const full = this._rateBetween(readings[0], readings[readings.length - 1]);
+        if (opts && opts.lifetime) return full;
+
+        const last = readings[readings.length - 1];
+        const cutoff = new Date(last.date);
+        cutoff.setDate(cutoff.getDate() - this.RECENT_WINDOW_DAYS);
+        const window = readings.filter(r => new Date(r.date) >= cutoff);
+        if (window.length >= 2) {
+            const a = window[0];
+            const spanDays = (new Date(last.date) - new Date(a.date)) / 86400000;
+            const spanKm = last.km - a.km;
+            if (spanDays >= this.RECENT_MIN_SPAN_DAYS && spanKm >= this.RECENT_MIN_KM) {
+                const recent = this._rateBetween(a, last);
+                if (recent) return recent;
+            }
+        }
+        return full;
+    },
+
+    // Both figures, for saying plainly when the two disagree
+    getRateDetail(carId) {
+        const now = this.getDailyKmRate(carId);
+        const lifetime = this.getDailyKmRate(carId, { lifetime: true });
+        if (!now || !lifetime) return null;
+        const changePct = Math.round((now / lifetime - 1) * 100);
+        // A percent or two apart is the same answer; only call it a change when it
+        // would actually move a due date.
+        return { now, lifetime, changePct, recent: Math.abs(changePct) >= 5 };
     },
 
     // Estimated odometer *right now*: last confirmed reading projected forward

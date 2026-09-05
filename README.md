@@ -35,6 +35,15 @@ user's history. Same rule applies to bill kinds and document labels.
 out first (`Recommendations.getMaintenanceStatus`). Km thresholds are also converted to a predicted date
 using the driving rate, so a km-based item can drive a calendar reminder.
 
+**The rate follows how the car is driven now.** `getDailyKmRate` used only the first and
+last reading ever, so it was a lifetime average that lagged badly when driving picked up:
+this car read 93 km/day across fifteen months while the most recent five weeks ran at 121,
+which put every km-based date about 30% late. It now prefers a window of roughly the last
+four months, but only when that window spans enough days and distance to mean something —
+otherwise the full history still answers, so one fresh reading can never swing the
+estimate. `getRateDetail` returns both figures, and calls the difference a change only when
+it is large enough to move a due date. Pass `{ lifetime: true }` for the old behaviour.
+
 **The odometer is projected, not static.** `Storage.getProjectedMileage` carries the last confirmed
 reading forward at the car's average km/day. Estimated values are labelled (`~`, `est.`) so a projection
 is never mistaken for a reading.

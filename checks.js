@@ -41,7 +41,8 @@ const Checks = {
     // = 109.59 km/day. Every service sits *inside* that window on both date and
     // mileage, so adding one never moves the first or last reading and the rate
     // stays a fixed, checkable number.
-    RATE: 40000 / 365,
+    RATE: 40000 / 365,          // lifetime: 60,000 -> 100,000 over 365 days
+    RATE_RECENT: 3300 / 30,     // recent window: 96,700 (day 30) -> 100,000 (today)
     fixture() {
         const day = n => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
         return {
@@ -84,10 +85,37 @@ const Checks = {
         const day = n => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
 
         // -- odometer projection --
-        this.near('daily km rate is derived from the reading spread',
-            Storage.getDailyKmRate('test-car'), this.RATE, 0.01);
+        // The fixture's last two readings are 30 days and 3,300 km apart, which
+        // qualifies as a recent window, so that is the rate the app should use.
+        this.near('the rate comes from recent driving when there is enough of it',
+            Storage.getDailyKmRate('test-car'), this.RATE_RECENT, 0.01);
+        this.near('the lifetime figure is still reachable',
+            Storage.getDailyKmRate('test-car', { lifetime: true }), this.RATE, 0.01);
         this.eq('a same-day reading is not treated as an estimate',
             Storage.getProjectedMileage(car).estimated, false);
+
+        // -- the rate must follow how the car is driven now, not its whole life --
+        // 110 and 109.6 are the same answer; only a real difference should be called one.
+        this.eq('a rate barely different from lifetime is not called a change',
+            Storage.getRateDetail('test-car').recent, false);
+
+        // Drive the recent stretch much harder and the rate must follow.
+        const day0 = Storage.getEffectiveMileage(Storage.getCars()[0]);
+        Storage.logOdometer('test-car', day0 + 5000, day(0));
+        const harder = Storage.getDailyKmRate('test-car');
+        this.ok('a harder recent stretch raises the rate', harder > this.RATE_RECENT * 1.2,
+            `${harder.toFixed(1)} vs ${this.RATE_RECENT.toFixed(1)}`);
+        this.near('the lifetime figure is unaffected by it',
+            Storage.getDailyKmRate('test-car', { lifetime: true }),
+            (day0 + 5000 - 60000) / 365, 0.01);
+        const detail = Storage.getRateDetail('test-car');
+        this.ok('and the change is reported', detail.recent && detail.changePct > 5, String(detail.changePct));
+
+        // The window starts at the OLDEST reading inside it, so a fresh reading can
+        // never shrink the span to something meaninglessly short.
+        this.ok('the rate is still measured over a usable span',
+            Storage.RECENT_MIN_SPAN_DAYS >= 21 && Storage.RECENT_MIN_KM >= 500);
+        this.seed(A.W);
 
         // A reading lower than one already recorded must not become "the latest".
         // The highest known value wins, which is what stops a typo rewriting history.
@@ -347,7 +375,8 @@ const Checks = {
         this.near('the parts add up to the total', cons.maintPerKm + cons.fuelPerKm, cons.totalPerKm, 1e-9);
 
         // The same real spend entered either way must land in the same place.
-        const monthlyEquivalent = (span * 11 / 100 * 2.33) / (span / this.RATE / 30.44);
+        const liveRate = Storage.getDailyKmRate('test-car');
+        const monthlyEquivalent = (span * 11 / 100 * 2.33) / (span / liveRate / 30.44);
         Features.saveFuelSettings({ mode: 'monthly', monthly: String(monthlyEquivalent), price: '2.33' });
         this.near('monthly spend agrees with consumption mode',
             Storage.getCostBreakdown('test-car').fuel, cons.fuel, 1);
