@@ -494,6 +494,18 @@ const App = {
     _handleOilReminder(data) {
         const interval=document.querySelector('input[name="oil-interval"]:checked');
         data.oilInterval=interval?interval.value:'5000';
+        // The oil you use is a property of how you run the car, not of one past
+        // service — so it becomes this car's Oil Change interval, which the whole
+        // schedule already respects. Before this the choice fed only the Reminders
+        // page while every other screen kept using Ford's figure, so switching
+        // 7,000 to 5,000 appeared to do nothing at all.
+        if(data.carId){
+            const car=Storage.getCars().find(c=>c.id===data.carId);
+            const mfr=car?Recommendations.getForService(car.make,car.model,'Oil Change'):null;
+            const lbl={'5000':'Regular','7000':'Semi-synthetic','10000':'Full synthetic'};
+            Recommendations.saveCustom(data.carId,'Oil Change',parseInt(data.oilInterval),
+                (mfr&&mfr.months)||6,t('Your oil choice: {label}',{label:t(lbl[data.oilInterval]||'Regular')}));
+        }
         if(data.mileage){
             const next=parseInt(data.mileage)+parseInt(data.oilInterval);
             Storage.getReminders(data.carId).filter(r=>r.type==='Oil Change'&&!r.completed&&r.autoCreated).forEach(r=>Storage.deleteReminder(r.id));

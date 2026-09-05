@@ -170,13 +170,15 @@ const Recommendations = {
             const mfr = this.getForService(car.make, car.model, serviceType);
             if (mfr) rec = { ...mfr, source: 'manufacturer' };
         }
-        // Apply climate multiplier (severe heat = 20% shorter intervals)
-        if (rec && typeof Features !== 'undefined') {
+        // Climate shortens *manufacturer guidance*, never a figure the owner chose
+        // themselves. Reducing an explicit 5,000 km to 4,000 would mean the number
+        // on screen is not the number that was picked.
+        if (rec && rec.source === 'manufacturer' && typeof Features !== 'undefined') {
             const mult = Features.getClimateMultiplier();
             if (mult !== 1.0) {
                 rec.km = Math.round(rec.km * mult);
                 if (rec.months) rec.months = Math.max(1, Math.round(rec.months * mult));
-                if (rec.source === 'manufacturer') rec.note += ' (climate-adjusted)';
+                rec.note += ' (climate-adjusted)';
             }
         }
         return rec;

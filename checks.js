@@ -223,6 +223,28 @@ const Checks = {
         this.ok('trip total is fuel plus wear', priced.totalCost > priced.fuelCost);
         Features.saveFuelSettings({ mode: 'off' });
 
+        // -- an explicitly chosen interval must drive the schedule, not just a reminder --
+        const mfrOil = Recommendations.getEffective(car, 'Oil Change');
+        this.eq('by default the oil interval comes from the manufacturer', mfrOil.source, 'manufacturer');
+        Recommendations.saveCustom('test-car', 'Oil Change', 5000, 6, 'Your oil choice: Regular');
+        const ownOil = Recommendations.getEffective(Storage.getCars()[0], 'Oil Change');
+        this.eq('a chosen interval takes over', ownOil.source, 'custom');
+        this.eq('and the schedule uses the number that was chosen', ownOil.km, 5000);
+        const st5 = Recommendations.getMaintenanceStatus(Storage.getCars()[0], 'Oil Change');
+        this.eq('the due point moves with it', st5.rec.km, 5000);
+
+        // Climate shortens manufacturer guidance only. Reducing an explicit 5,000
+        // to 4,000 would put a number on screen that nobody picked.
+        A.W.localStorage.setItem('autocare_climate', 'severe');
+        this.eq('severe climate does not shrink a chosen interval',
+            Recommendations.getEffective(Storage.getCars()[0], 'Oil Change').km, 5000);
+        Recommendations.deleteCustom('test-car', 'Oil Change');
+        this.ok('severe climate still shortens manufacturer guidance',
+            Recommendations.getEffective(Storage.getCars()[0], 'Oil Change').km < mfrOil.km,
+            String(Recommendations.getEffective(Storage.getCars()[0], 'Oil Change').km) + ' vs ' + mfrOil.km);
+        A.W.localStorage.setItem('autocare_climate', 'normal');
+        this.seed(A.W);
+
         // -- postponing: changes when you are told, never whether it is due --
         const air0 = Recommendations.getMaintenanceStatus(car, 'Air Filter');
         this.eq('the item is overdue before postponing', air0.status, 'overdue');

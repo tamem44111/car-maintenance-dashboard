@@ -54,6 +54,14 @@ inspection you attended: there the expiry is *suggested* a year out from the ser
 stays editable, so it never silently overwrites a date you typed. Centres come from
 `Features.INSPECTION_CENTRES` (Dammam, Khobar) — extend that array to add more.
 
+**An interval the owner picks is the interval.** Choosing an oil type writes a *custom
+interval* for that car via `Recommendations.saveCustom`, which `getEffective` already
+prefers over manufacturer data — so the choice drives the schedule, the Action Center, the
+trip planner and the forecast alike. Before this it fed only the auto-created reminder,
+so switching 7,000 to 5,000 changed one screen and left every other one on Ford's 9,600.
+The climate multiplier applies to **manufacturer guidance only**: shrinking an explicit
+5,000 to 4,000 would put a number on screen that nobody chose.
+
 **No record is not the same as never done.** Most owners start logging partway through a
 car's life — this one began in August 2025, at 389,951 km. So `getMaintenanceStatus`
 returns `status: 'unknown'` with **null** due date, next mileage and km remaining rather
@@ -154,10 +162,6 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
 
 **Verified in the code, August 2026 — none of these are fixed:**
 
-- **Two different oil intervals are live at once.** The owner picked 7,000 km
-  semi-synthetic; `getMaintenanceStatus` ignores `service.oilInterval` and uses the
-  manufacturer 12,000 x 0.8 = 9,600. Reminders say next oil at 432,881 km, the dashboard
-  says 435,481. Both are on screen.
 - **A note-only record still resets a schedule.** The 2025-08-17 Transmission entry (no
   cost, note "Need to replace after 60000") is counted as a completed fluid change. The
   owner acts on this app, so this one matters most.
