@@ -227,6 +227,22 @@ Ford uses the Intelligent Oil-Life Monitor. The manual gives a guideline table o
 Hard cap: *"Do not exceed one year or 10000 miles (16000 kilometers) between service
 intervals."* The owner's actual average of 4,086 km sits below even the Extreme band.
 
+### The owner's actual pattern (Sept 2026)
+
+Trip computer, over a 4,246 km sample: **11.6 L/100 km measured**, and 99 hours of running
+time for those 4,246 km — a **43 km/h average**, where steady intercity highway would sit
+near 100. The owner describes the mix as some highway, some traffic, some idling with the
+AC on.
+
+That puts transmission fluid, and only transmission fluid, on Ford's low-speed/idling
+figure of 48,000 km rather than the Normal 240,000 — set as a per-car custom interval
+carrying the manual page in its note, so it is deliberate rather than the accident it is
+today: the hardcoded 60,000 × 0.8 climate factor happens to land on the same 48,000.
+Everything else stays on Normal.
+
+A cluster photo also read 430,127.4 km where the app projected 430,174 — 47 km out across
+a two-day gap, which is the projection model working as intended.
+
 ### Severity is per-item, not global (p. 387–388)
 
 `autocare_climate` shortens **all fourteen** intervals by 20%. Ford does not work that way.
