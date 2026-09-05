@@ -35,6 +35,12 @@ user's history. Same rule applies to bill kinds and document labels.
 out first (`Recommendations.getMaintenanceStatus`). Km thresholds are also converted to a predicted date
 using the driving rate, so a km-based item can drive a calendar reminder.
 
+**Nothing may be dated in the future.** `logOdometer` refuses a future reading and
+`addService` pulls a future service date back to today, because either one silently
+corrupts the schedule: a reading dated tomorrow becomes the car's current mileage, and a
+service dated next year resets its own interval from a date that has not happened. Both
+date pickers also carry `max="today"`.
+
 **The rate follows how the car is driven now.** `getDailyKmRate` used only the first and
 last reading ever, so it was a lifetime average that lagged badly when driving picked up:
 this car read 93 km/day across fifteen months while the most recent five weeks ran at 121,
@@ -174,7 +180,6 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
 - **A note-only record still resets a schedule.** The 2025-08-17 Transmission entry (no
   cost, note "Need to replace after 60000") is counted as a completed fluid change. The
   owner acts on this app, so this one matters most.
-- **Auto-reminder dates assume 40 km/day** (`App._estDate`) against a real rate of 105.
 - **Untranslated in Arabic:** `or at` and `confirm('Delete?')` in the reminder card,
   `Still covered` / `Active` in the Warranty Center, and the service-insight sentence on
   Expenses. Also **auto-generated reminder notes** ("Auto: next Air Filter at 437,881 km"),

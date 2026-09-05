@@ -141,12 +141,14 @@ const Storage = {
             services: data.services.filter(s => s.carId === id),
             reminders: data.reminders.filter(r => r.carId === id),
             fuelLogs: data.fuelLogs.filter(f => f.carId === id),
-            odometerLogs: (data.odometerLogs || []).filter(o => o.carId === id)
+            odometerLogs: (data.odometerLogs || []).filter(o => o.carId === id),
+            snoozes: (data.snoozes || []).filter(s => s.carId === id)
         };
         data.services = data.services.filter(s => s.carId !== id);
         data.reminders = data.reminders.filter(r => r.carId !== id);
         data.fuelLogs = data.fuelLogs.filter(f => f.carId !== id);
         data.odometerLogs = (data.odometerLogs || []).filter(o => o.carId !== id);
+        data.snoozes = (data.snoozes || []).filter(s => s.carId !== id);
         this.save(data);
         this._toTrash('car', 'cars', id, extras);
     },
@@ -159,6 +161,10 @@ const Storage = {
     },
 
     addService(service) {
+        // A service dated in the future resets its own schedule from a date that
+        // has not happened, pushing the next one out by a full interval.
+        const today = new Date().toISOString().split('T')[0];
+        if (service && service.date && service.date > today) service.date = today;
         const data = this.getAll();
         service.id = Date.now().toString() + Math.random().toString(36).substr(2, 4);
         data.services.push(service);
@@ -233,12 +239,16 @@ const Storage = {
     logOdometer(carId, km, date) {
         const reading = parseInt(km);
         if (!reading || !carId) return null;
+        // A reading dated in the future would become the car's current mileage and
+        // drag every projection with it. Nobody can read tomorrow's odometer.
+        const when = date || new Date().toISOString().split('T')[0];
+        if (when > new Date().toISOString().split('T')[0]) return null;
         const data = this.getAll();
         const entry = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
             carId,
             km: reading,
-            date: date || new Date().toISOString().split('T')[0]
+            date: when
         };
         data.odometerLogs.push(entry);
         this.save(data);

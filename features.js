@@ -394,7 +394,7 @@ const Features = {
             <div id="odo-panel-wrap">${panel(target)}</div>
             <div class="form-row">
                 <div class="form-group"><label>Current Odometer (km)</label><input type="number" id="f-odo-km" placeholder="e.g. 62500" inputmode="numeric" oninput="Features._checkOdoInput()"></div>
-                <div class="form-group"><label>Reading Date</label><input type="date" id="f-odo-date" value="${new Date().toISOString().split('T')[0]}"></div>
+                <div class="form-group"><label>${t('Reading Date')}</label><input type="date" id="f-odo-date" max="${new Date().toISOString().split('T')[0]}" value="${new Date().toISOString().split('T')[0]}"></div>
             </div>
             <div id="odo-warn"></div>`;
 

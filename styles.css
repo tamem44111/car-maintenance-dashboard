@@ -2241,3 +2241,6 @@ tr:hover td { background: var(--card-hover); }
 }
 .snooze-choice:hover { border-color: var(--primary); color: var(--primary); }
 .snooze-choice:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+/* Said only when it would move a due date, so it stays meaningful. */
+.odo-trend { color: var(--orange); font-weight: 600; }

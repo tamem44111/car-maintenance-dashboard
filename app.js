@@ -241,7 +241,7 @@ const App = {
                 </div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" value="${service?service.date:new Date().toISOString().split('T')[0]}" onchange="App._toggleServiceExtras()"></div>
+                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" max="${new Date().toISOString().split('T')[0]}" value="${service?service.date:new Date().toISOString().split('T')[0]}" onchange="App._toggleServiceExtras()"></div>
                 <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
             <div id="inspection-options" style="display:none">
@@ -510,10 +510,19 @@ const App = {
             const next=parseInt(data.mileage)+parseInt(data.oilInterval);
             Storage.getReminders(data.carId).filter(r=>r.type==='Oil Change'&&!r.completed&&r.autoCreated).forEach(r=>Storage.deleteReminder(r.id));
             const labels={'5000':'Regular','7000':'Semi-synthetic','10000':'Full synthetic'};
-            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:this._estDate(data.date,data.oilInterval),dueMileage:next.toString(),notes:`Auto: next oil change at ${next.toLocaleString()} km (${labels[data.oilInterval]})`,completed:false,autoCreated:true});
+            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:this._estDate(data.date,data.oilInterval,data.carId),dueMileage:next.toString(),notes:`Auto: next oil change at ${next.toLocaleString()} km (${labels[data.oilInterval]})`,completed:false,autoCreated:true});
         }
     },
-    _estDate(d,interval){ const avg=40,days=Math.round(parseInt(interval)/avg),dt=new Date(d); dt.setDate(dt.getDate()+days); return dt.toISOString().split('T')[0]; },
+    // How long an interval takes at the rate this car is actually driven. The old
+    // constant of 40 km/day dated the next oil change 125 days out for a car doing
+    // 121 km/day, when the true answer was 41 — three times wrong, on the one date
+    // the Reminders page shows.
+    _estDate(d,interval,carId){
+        const rate=(carId&&Storage.getDailyKmRate(carId))||40;
+        const days=Math.round(parseInt(interval)/rate);
+        const dt=new Date(d); dt.setDate(dt.getDate()+days);
+        return dt.toISOString().split('T')[0];
+    },
 
     // ── Fuel Modal ──
     openFuelModal(log = null) {
@@ -610,7 +619,13 @@ const App = {
                 ? t('Estimated. Last read {km} km on {d}, {n} days ago at about {r} km a day.', {
                     km: proj.lastKm.toLocaleString(), d: proj.lastDate,
                     n: proj.daysSince, r: Math.round(proj.rate || 0) })
-                : t('Confirmed reading from {d}.', { d: proj.lastDate || '—' })}</div>
+                : t('Confirmed reading from {d}.', { d: proj.lastDate || '—' })}${(() => {
+                    // Say it when the car is being driven noticeably harder than its
+                    // long-run average — every due date is projected off this number.
+                    const rd = Storage.getRateDetail(car.id);
+                    return (rd && rd.recent && rd.changePct > 0)
+                        ? ` <span class="odo-trend">${t('Driving {p}% more than usual lately', { p: rd.changePct })}</span>` : '';
+                })()}</div>
             <button type="button" class="odo-update" onclick="Features.openOdometerModal('${car.id}')">${
                 fresh.stale || fresh.never ? t('Update the odometer') : t('Enter a new reading')}</button>
         </div>`;

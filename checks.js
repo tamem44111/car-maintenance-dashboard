@@ -80,7 +80,7 @@ const Checks = {
 
     // ═══════════════ logic checks ═══════════════
     async logic(A) {
-        const { Storage, Recommendations, Features } = A;
+        const { Storage, Recommendations, Features, App } = A;
         const car = Storage.getCars()[0];
         const day = n => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
 
@@ -272,6 +272,36 @@ const Checks = {
             String(Recommendations.getEffective(Storage.getCars()[0], 'Oil Change').km) + ' vs ' + mfrOil.km);
         A.W.localStorage.setItem('autocare_climate', 'normal');
         this.seed(A.W);
+
+        // -- nothing may be dated in the future --
+        // A reading dated tomorrow becomes the car's current mileage; a service dated
+        // next year resets its own schedule from a date that has not happened.
+        const kmBefore = Storage.getEffectiveMileage(car);
+        this.eq('a future-dated odometer reading is refused',
+            Storage.logOdometer('test-car', 999999, day(-365)), null);
+        this.eq('and the mileage is untouched', Storage.getEffectiveMileage(Storage.getCars()[0]), kmBefore);
+        Storage.addService({ carId: 'test-car', type: 'AC Service', date: day(-400), cost: '100', mileage: '' });
+        const filed = Storage.getServices('test-car').find(s => s.type === 'AC Service');
+        this.ok('a future-dated service is pulled back to today', filed.date <= day(0), filed.date);
+        this.seed(A.W);
+
+        // -- a deleted car takes its postponements with it, and brings them back --
+        Storage.snoozeItem('test-car', 'Oil Change', 30);
+        Storage.deleteCar('test-car');
+        this.eq('deleting a car leaves no orphaned postponements',
+            Storage.getAll().snoozes.filter(s => s.carId === 'test-car').length, 0);
+        const binned = Storage.getTrash().find(t => t.kind === 'car');
+        Storage.restoreFromTrash(binned.id);
+        this.eq('restoring the car brings its postponements back',
+            Storage.getAll().snoozes.filter(s => s.carId === 'test-car').length, 1);
+        this.seed(A.W);
+
+        // -- the reminder date must use the rate this car is actually driven at --
+        const rate = Storage.getDailyKmRate('test-car');
+        const est = App._estDate(day(0), 5000, 'test-car');
+        const days = Math.round((new Date(est) - new Date(day(0))) / 86400000);
+        this.near('an interval is dated at the real driving rate', days, Math.round(5000 / rate), 1);
+        this.ok('which is not the old flat 40 km/day guess', Math.abs(days - 125) > 5, `${days} days`);
 
         // -- postponing: changes when you are told, never whether it is due --
         const air0 = Recommendations.getMaintenanceStatus(car, 'Air Filter');
