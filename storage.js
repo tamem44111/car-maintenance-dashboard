@@ -2,7 +2,7 @@ const Storage = {
     _key: 'autocare_data',
 
     _defaults() {
-        return { cars: [], services: [], reminders: [], fuelLogs: [], odometerLogs: [], trash: [] };
+        return { cars: [], services: [], reminders: [], fuelLogs: [], odometerLogs: [], trash: [], snoozes: [] };
     },
 
     getAll() {
@@ -12,6 +12,7 @@ const Storage = {
         if (!data.fuelLogs) data.fuelLogs = [];
         if (!data.odometerLogs) data.odometerLogs = [];
         if (!data.trash) data.trash = [];
+        if (!data.snoozes) data.snoozes = [];
         return data;
     },
 
@@ -163,6 +164,8 @@ const Storage = {
         data.services.push(service);
         this.save(data);
         this._syncOdometer(service.carId, service.mileage, service.date);
+        // Actually doing the job ends any postponement of it
+        this.clearSnooze(service.carId, service.type);
         return service;
     },
 
@@ -802,6 +805,59 @@ const Storage = {
     // ── Tyre age ──
     // Rubber hardens with heat and time regardless of tread depth, which matters
     // more here than tread wear does.
+    // ── Postponing ────────────────────────────────────────────────────────
+    // Not every due job can be done the week it falls due — time and money get in
+    // the way. Without a way to say "later", the only tool to hand is logging the
+    // job as done, which tells the schedule the opposite of the truth and quietly
+    // pushes the next one out by a full interval.
+    //
+    // A postponement changes WHEN YOU ARE TOLD, never WHETHER IT IS DUE. The
+    // schedule is untouched: getMaintenanceStatus still reports overdue, and the
+    // item stays visible under Postponed with the date it comes back. Nothing can
+    // disappear by being postponed.
+    snoozeItem(carId, type, days, note) {
+        const data = this.getAll();
+        const until = new Date();
+        until.setDate(until.getDate() + Math.max(1, parseInt(days) || 7));
+        const untilStr = until.toISOString().split('T')[0];
+        const existing = data.snoozes.find(s => s.carId === carId && s.type === type);
+        if (existing) {
+            existing.until = untilStr;
+            existing.times = (existing.times || 1) + 1;
+            if (note !== undefined) existing.note = note;
+        } else {
+            data.snoozes.push({
+                id: 'sn_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                carId, type, until: untilStr, times: 1,
+                createdAt: new Date().toISOString().split('T')[0],
+                note: note || ''
+            });
+        }
+        this.save(data);
+        return untilStr;
+    },
+
+    // Expired postponements are dropped on read, so an item returns on its own.
+    getSnooze(carId, type) {
+        const today = new Date().toISOString().split('T')[0];
+        return this.getAll().snoozes.find(s =>
+            s.carId === carId && s.type === type && s.until > today) || null;
+    },
+
+    getActiveSnoozes(carId) {
+        const today = new Date().toISOString().split('T')[0];
+        return this.getAll().snoozes
+            .filter(s => s.until > today && (!carId || carId === 'all' || s.carId === carId))
+            .sort((a, b) => a.until.localeCompare(b.until));
+    },
+
+    clearSnooze(carId, type) {
+        const data = this.getAll();
+        const before = data.snoozes.length;
+        data.snoozes = data.snoozes.filter(s => !(s.carId === carId && s.type === type));
+        if (data.snoozes.length !== before) this.save(data);
+    },
+
     // ── Planning a journey ────────────────────────────────────────────────
     // This owner drives between cities, so the useful question is not "what is
     // due?" but "what runs out while I am 700 km from home?". Everything here is

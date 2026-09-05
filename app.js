@@ -263,7 +263,7 @@ const App = {
             <div id="brake-options" style="display:none">
                 <div class="form-group"><label>${t('Brake Pad Thickness (mm)')}</label><input type="number" id="f-pad" step="0.5" placeholder="${t('e.g. 7')}" value="${service&&service.padThickness?service.padThickness:''}"><small class="field-note">${t('New pads are about 10-12 mm; replace at 3 mm. Logging this predicts wear far better than a fixed interval.')}</small></div>
             </div>
-            <div class="form-group"><label>${t('Mileage at Service (km)')}</label><input type="number" id="f-smileage" placeholder="50000" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{})||'':'')}"><small id="smileage-note" class="field-note"></small></div>
+            <div class="form-group"><label>${t('Mileage at Service (km)')}</label><input type="number" id="f-smileage" placeholder="50000" oninput="App._checkServiceMileage()" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{})||'':'')}"><small id="smileage-note" class="field-note"></small><div id="smileage-warn"></div></div>
             ${Features.renderBillsEditor(service?service.bills:[])}
             <div class="form-group"><label>${t('Notes')}</label><textarea id="f-notes" rows="2" placeholder="${t('Optional...')}">${service?service.notes||'':''}</textarea></div>`;
         this.openModal(isEdit?'Edit Service':'Add Service', html, () => {
@@ -399,6 +399,7 @@ const App = {
             if (on) this._paintInspectionDerived();
         }
         this._paintBeltNote(picked);
+        this._checkServiceMileage();
     },
 
     // Timing Belt is offered to everyone, but the schedule ignores it until the car
@@ -441,6 +442,37 @@ const App = {
             if (i.value === el.value && i !== el) i.checked = el.checked;
         });
         this._toggleServiceExtras();
+    },
+
+    // A service dated in the past carrying today's odometer is how one record
+    // collapsed a 124 km/day driving rate to 2.3: the reading became the earliest
+    // point in the car's history. The odometer screen has warned about backwards
+    // readings for months; this screen never did.
+    _checkServiceMileage() {
+        const warn = document.getElementById('smileage-warn');
+        if (!warn) return;
+        const sel = document.getElementById('f-car');
+        const dateEl = document.getElementById('f-date');
+        const kmEl = document.getElementById('f-smileage');
+        if (!sel || !dateEl || !kmEl) return;
+        const car = Storage.getCars().find(c => c.id === sel.value);
+        const km = parseInt(kmEl.value);
+        const date = dateEl.value;
+        warn.innerHTML = '';
+        if (!car || !km || !date) return;
+        const today = new Date().toISOString().split('T')[0];
+        if (date >= today) return;                       // not back-dated
+        // What was the odometer actually reading around that date?
+        const before = Storage.getOdometerReadings(car.id)
+            .filter(r => r.date && r.date <= date).map(r => r.km);
+        const after = Storage.getOdometerReadings(car.id)
+            .filter(r => r.date && r.date > date).map(r => r.km);
+        const laterMin = after.length ? Math.min(...after) : null;
+        if (laterMin !== null && km > laterMin) {
+            warn.innerHTML = `<div class="odo-warning">${t(
+                'On {d} the odometer had not reached {km} km yet — a later record already reads {l} km. Check the reading, or leave it blank.',
+                { d: date, km: km.toLocaleString(), l: laterMin.toLocaleString() })}</div>`;
+        }
     },
 
     // Pre-fill "Mileage at Service" from the selected car's current reading

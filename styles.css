@@ -2225,3 +2225,19 @@ tr:hover td { background: var(--card-hover); }
 
 /* The legacy stat grid sets display:grid, which outranks the hidden attribute. */
 .stats-grid[hidden] { display: none; }
+
+/* Postponing. The postponed block is deliberately quieter than the live list but
+   is never hidden — a job you put off twice should still be on the screen. */
+.nd-acts { display: flex; flex-direction: column; gap: 6px; flex: none; }
+.nd-act-quiet { border-color: transparent; color: var(--text2); font-weight: 500; }
+.nd-act-quiet:hover { border-color: var(--border); }
+.nd-postponed { opacity: .82; }
+.nd-later .nd-bar { background: var(--border-strong); }
+.snooze-choices { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 16px; }
+.snooze-choice {
+    flex: 1 1 auto; padding: 12px 14px; border: 1px solid var(--border);
+    border-radius: 10px; background: var(--card); color: var(--text);
+    font: 600 13.5px inherit; cursor: pointer; transition: var(--transition);
+}
+.snooze-choice:hover { border-color: var(--primary); color: var(--primary); }
+.snooze-choice:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }

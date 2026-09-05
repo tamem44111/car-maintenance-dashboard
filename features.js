@@ -126,12 +126,13 @@ const Features = {
                     const seen = new Set(existing[key].map(x => x.id));
                     data[key].forEach(x => { if (!seen.has(x.id)) existing[key].push(x); });
                 };
-                ['cars', 'services', 'reminders', 'fuelLogs', 'odometerLogs', 'trash'].forEach(mergeBy);
+                ['cars', 'services', 'reminders', 'fuelLogs', 'odometerLogs', 'trash', 'snoozes'].forEach(mergeBy);
                 Storage.save(existing);
             } else {
                 Storage.save({
                     cars: data.cars, services: data.services, reminders: data.reminders,
-                    fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [], trash: data.trash || []
+                    fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [], trash: data.trash || [],
+                    snoozes: data.snoozes || []
                 });
             }
             if (data.customRecs) localStorage.setItem('autocare_custom_recs', JSON.stringify(data.customRecs));
@@ -803,7 +804,7 @@ const Features = {
         const cars = Storage.getCars().filter(c => carId === 'all' || c.id === carId);
         if (!cars.length) { el.innerHTML = ''; return; }
 
-        const items = [];
+        let items = [];
         const today = new Date();
         const recTypes = Recommendations.ALL_TYPES;
 
@@ -822,7 +823,7 @@ const Features = {
                 if (!st || st.status === 'ok' || st.status === 'unknown') return;
                 items.push({
                     priority: st.status === 'overdue' ? 0 : 1,
-                    icon: 'wrench',
+                    icon: 'wrench', carId: c.id, type,
                     title: st.status === 'overdue' ? t('{type} overdue', {type: I18N.t(type)}) : t('{type} due soon', {type: I18N.t(type)}),
                     sub: `${name} · ${st.detail}`,
                     action: { label: t('Log'), fn: `App.openServiceModal(null,'${c.id}','${type}')` }
@@ -938,13 +939,25 @@ const Features = {
             items.push({ priority: 1, icon: 'save', title: t('Last backup was {d} days ago', {d: backup.daysSinceBackup}), sub: t('You have changes since then — save a fresh copy'), action: { label: t('Back up'), fn: 'Features.exportData()' } });
         }
 
+        // Postponed items leave the main list but never leave the screen — they
+        // move to their own line with the date they come back and how overdue
+        // they still are. The schedule was never told anything.
+        const postponed = [];
+        const live = items.filter(it => {
+            if (!it.type) return true;
+            const sn = Storage.getSnooze(it.carId, it.type);
+            if (!sn) return true;
+            postponed.push({ ...it, snooze: sn });
+            return false;
+        });
+        items = live;
         items.sort((a, b) => a.priority - b.priority);
 
         if (!items.length) {
             el.innerHTML = `<div class="nd-list"><div class="nd-row nd-ok">
                 <span class="nd-bar" aria-hidden="true"></span>
                 <div class="nd-body"><div class="nd-title">${t("All caught up")}</div><div class="nd-sub">${t("No maintenance, documents, or alerts need attention right now.")}</div></div>
-            </div></div>`;
+            </div></div>` + this.postponedHTML(postponed);
             return;
         }
 
@@ -971,10 +984,79 @@ const Features = {
                 <div class="nd-row ${pClass[it.priority]}">
                     <span class="nd-bar" aria-hidden="true"></span>
                     <div class="nd-body"><div class="nd-title">${it.title}</div><div class="nd-sub">${it.sub}</div></div>
-                    ${it.action ? `<button type="button" class="nd-act" onclick="${it.action.fn}">${it.action.label}</button>` : ''}
+                    <div class="nd-acts">
+                        ${it.action ? `<button type="button" class="nd-act" onclick="${it.action.fn}">${it.action.label}</button>` : ''}
+                        ${it.type ? `<button type="button" class="nd-act nd-act-quiet" onclick="Features.openSnoozeModal('${it.carId}','${it.type}')">${t('Later')}</button>` : ''}
+                    </div>
                 </div>`).join('')}
             ${items.length > 6 ? `<div class="nd-row"><div class="nd-sub">${t('+ {n} more', {n: items.length - 6})}</div></div>` : ''}
+        </div>` + this.postponedHTML(postponed);
+    },
+
+    // Postponed work, shown rather than hidden. It still says how overdue the job
+    // is, because postponing was only ever about when you are reminded.
+    postponedHTML(postponed) {
+        if (!postponed || !postponed.length) return '';
+        return `<div class="nd-list nd-postponed">
+            <div class="nd-head"><h3>${t('Postponed')}</h3><span class="nd-head-meta">${
+                postponed.length > 1 ? t('{n} items', {n: postponed.length}) : t('{n} item', {n: postponed.length})}</span></div>
+            ${postponed.map(it => `
+                <div class="nd-row nd-later">
+                    <span class="nd-bar" aria-hidden="true"></span>
+                    <div class="nd-body">
+                        <div class="nd-title">${it.title}</div>
+                        <div class="nd-sub">${t('back on {d}', {d: it.snooze.until})}${
+                            it.snooze.times > 1 ? ' · ' + t('postponed {n} times', {n: it.snooze.times}) : ''} · ${it.sub}</div>
+                    </div>
+                    <div class="nd-acts">
+                        ${it.action ? `<button type="button" class="nd-act" onclick="${it.action.fn}">${it.action.label}</button>` : ''}
+                        <button type="button" class="nd-act nd-act-quiet" onclick="Features.unsnooze('${it.carId}','${it.type}')">${t('Undo')}</button>
+                    </div>
+                </div>`).join('')}
         </div>`;
+    },
+
+    unsnooze(carId, type) {
+        Storage.clearSnooze(carId, type);
+        App.renderPage(App.currentPage);
+    },
+
+    SNOOZE_CHOICES: [
+        { days: 7,  label: 'Next week' },
+        { days: 30, label: 'Next month' },
+        { days: 90, label: 'In three months' }
+    ],
+
+    openSnoozeModal(carId, type) {
+        const car = Storage.getCars().find(c => c.id === carId);
+        const st = car ? Recommendations.getMaintenanceStatus(car, type) : null;
+        const existing = Storage.getSnooze(carId, type);
+        const html = `
+            <p class="doc-intro">${t('This stays due. Postponing only changes when the app brings it up again.')}</p>
+            ${st ? `<div class="derived"><span class="derived-label">${I18N.t(type)}</span>
+                <span class="derived-value">${st.detail}</span></div>` : ''}
+            <div class="snooze-choices">
+                ${this.SNOOZE_CHOICES.map(c =>
+                    `<button type="button" class="snooze-choice" onclick="Features.applySnooze('${carId}','${type}',${c.days})">${t(c.label)}</button>`).join('')}
+            </div>
+            <div class="form-group"><label>${t('Or pick a date')}</label>
+                <input type="date" id="f-snooze-date" min="${new Date(Date.now() + 86400000).toISOString().split('T')[0]}"></div>
+            <div class="form-group"><label>${t('Why? (optional)')}</label>
+                <input type="text" id="f-snooze-note" placeholder="${t('e.g. waiting for payday')}" value="${(existing && existing.note || '').replace(/"/g, '&quot;')}"></div>`;
+        App.openModal(t('Postpone {type}', { type: I18N.t(type) }), html, () => {
+            const d = document.getElementById('f-snooze-date').value;
+            if (!d) return alert(t('Choose how long, or pick a date.'));
+            const days = Math.ceil((new Date(d) - new Date()) / 86400000);
+            Features.applySnooze(carId, type, days);
+        });
+    },
+
+    applySnooze(carId, type, days) {
+        const note = (document.getElementById('f-snooze-note') || {}).value || '';
+        const until = Storage.snoozeItem(carId, type, days, note.trim());
+        App.closeModal();
+        App.renderPage(App.currentPage);
+        alert(t('Postponed. It comes back on {d}, and stays due until you log it.', { d: until }));
     },
 
     // ── Cost Forecast ──

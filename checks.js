@@ -223,6 +223,39 @@ const Checks = {
         this.ok('trip total is fuel plus wear', priced.totalCost > priced.fuelCost);
         Features.saveFuelSettings({ mode: 'off' });
 
+        // -- postponing: changes when you are told, never whether it is due --
+        const air0 = Recommendations.getMaintenanceStatus(car, 'Air Filter');
+        this.eq('the item is overdue before postponing', air0.status, 'overdue');
+        const until = Storage.snoozeItem('test-car', 'Air Filter', 30, 'no time');
+        this.ok('a postponement records a future return date', until > day(0), until);
+        const air1 = Recommendations.getMaintenanceStatus(Storage.getCars()[0], 'Air Filter');
+        this.eq('postponing does NOT change the schedule', air1.status, 'overdue');
+        this.eq('and does not move the due date', air1.dueDate, air0.dueDate);
+        this.ok('the postponement is findable', !!Storage.getSnooze('test-car', 'Air Filter'));
+        this.eq('it appears in the active list', Storage.getActiveSnoozes('test-car').length, 1);
+
+        // postponing again extends it and counts
+        Storage.snoozeItem('test-car', 'Air Filter', 7);
+        this.eq('postponing again counts the times', Storage.getSnooze('test-car', 'Air Filter').times, 2);
+
+        // an expired postponement lets the item return on its own
+        const data = Storage.getAll();
+        data.snoozes[0].until = day(2);
+        Storage.save(data);
+        this.eq('an expired postponement stops applying', Storage.getSnooze('test-car', 'Air Filter'), null);
+        this.eq('and drops out of the active list', Storage.getActiveSnoozes('test-car').length, 0);
+
+        // doing the job ends the postponement
+        Storage.snoozeItem('test-car', 'Air Filter', 30);
+        Storage.addService({ carId: 'test-car', type: 'Air Filter', date: day(0), cost: '80', mileage: '' });
+        this.eq('logging the service clears the postponement', Storage.getSnooze('test-car', 'Air Filter'), null);
+        this.seed(A.W);
+
+        // it must survive a backup, or a restore silently un-postpones everything
+        Storage.snoozeItem('test-car', 'Oil Change', 14);
+        this.ok('postponements are part of the saved data', Storage.getAll().snoozes.length === 1);
+        this.seed(A.W);
+
         // -- tyres: judged on distance and on rubber age, whichever binds first --
         this.eq('with no tyre information there is no status', Storage.getTyreStatus(car), null);
         this.ok('Tires is loggable', Recommendations.logTypes().includes('Tires'));
