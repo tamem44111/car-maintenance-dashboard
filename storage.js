@@ -418,6 +418,28 @@ const Storage = {
         return parseFloat(service.cost) || 0;
     },
 
+    // An accident repair is a one-off, not wear: its parts still count for the
+    // schedule, but its cost stays out of every running figure (spend totals,
+    // cost per km, monthly bars, averages, keep-or-sell) or one crash would
+    // distort them for years. getServiceCost stays the bills' value; when
+    // insurance paid, what it cost the owner is 0.
+    getOwnCost(service) {
+        return service && service.insurancePaid ? 0 : this.getServiceCost(service);
+    },
+
+    getRunningCost(service) {
+        return service && service.accident ? 0 : this.getServiceCost(service);
+    },
+
+    getAccidentTotals(carId) {
+        const list = this.getServices(carId).filter(s => s.accident);
+        return {
+            count: list.length,
+            value: list.reduce((sum, s) => sum + this.getServiceCost(s), 0),
+            own: list.reduce((sum, s) => sum + this.getOwnCost(s), 0)
+        };
+    },
+
     getBills(carId) {
         const out = [];
         this.getServices(carId).forEach(s => {
@@ -519,13 +541,13 @@ const Storage = {
 
     // --- Computed ---
     getTotalExpenses(carId) {
-        const serviceCost = this.getServices(carId).reduce((sum, s) => sum + this.getServiceCost(s), 0);
+        const serviceCost = this.getServices(carId).reduce((sum, s) => sum + this.getRunningCost(s), 0);
         const fuelCost = this.getFuelLogs(carId).reduce((sum, f) => sum + (parseFloat(f.totalCost) || 0), 0);
         return serviceCost + fuelCost;
     },
 
     getServiceExpenses(carId) {
-        return this.getServices(carId).reduce((sum, s) => sum + this.getServiceCost(s), 0);
+        return this.getServices(carId).reduce((sum, s) => sum + this.getRunningCost(s), 0);
     },
 
     getFuelExpenses(carId) {
@@ -576,9 +598,9 @@ const Storage = {
 
     // Average historical cost for a service type (used to estimate upcoming spend)
     getAverageServiceCost(type, carId) {
-        const matches = this.getServices(carId).filter(s => s.type === type && this.getServiceCost(s) > 0);
+        const matches = this.getServices(carId).filter(s => s.type === type && this.getRunningCost(s) > 0);
         if (!matches.length) return null;
-        return matches.reduce((s, x) => s + this.getServiceCost(x), 0) / matches.length;
+        return matches.reduce((s, x) => s + this.getRunningCost(x), 0) / matches.length;
     },
 
     // Fallback estimates (SAR) when no personal history exists yet
@@ -676,7 +698,7 @@ const Storage = {
     // Spend within a given YYYY-MM month
     getMonthlySpend(carId, yearMonth) {
         let total = 0;
-        this.getServices(carId).forEach(s => { if (s.date && s.date.substring(0, 7) === yearMonth) total += this.getServiceCost(s); });
+        this.getServices(carId).forEach(s => { if (s.date && s.date.substring(0, 7) === yearMonth) total += this.getRunningCost(s); });
         this.getFuelLogs(carId).forEach(f => { if (f.date && f.date.substring(0, 7) === yearMonth) total += parseFloat(f.totalCost) || 0; });
         return total;
     },
@@ -816,7 +838,7 @@ const Storage = {
             const items = [];
             Object.entries(byType).forEach(([type, list]) => {
                 list.sort((a, b) => parseInt(a.mileage) - parseInt(b.mileage));
-                const costs = list.map(s => this.getServiceCost(s)).filter(c => c > 0);
+                const costs = list.map(s => this.getRunningCost(s)).filter(c => c > 0);
                 const avgCost = costs.length ? costs.reduce((a, b) => a + b, 0) / costs.length : null;
                 const gaps = [];
                 for (let i = 1; i < list.length; i++) {
@@ -1037,7 +1059,7 @@ const Storage = {
         yearAgo.setFullYear(yearAgo.getFullYear() - 1);
 
         let maint12 = 0, fuel12 = 0;
-        this.getServices(carId).forEach(s => { if (s.date && new Date(s.date) >= yearAgo) maint12 += this.getServiceCost(s); });
+        this.getServices(carId).forEach(s => { if (s.date && new Date(s.date) >= yearAgo) maint12 += this.getRunningCost(s); });
         this.getFuelLogs(carId).forEach(f => { if (f.date && new Date(f.date) >= yearAgo) fuel12 += parseFloat(f.totalCost) || 0; });
 
         // Distance per year. Readings inside the window rarely span a full 12 months,

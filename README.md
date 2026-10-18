@@ -43,6 +43,13 @@ way to record a brake-pad measurement was to file a pad replacement, which reset
 km interval for work nobody did — the same trap that turned "change next oil service" into
 a completed spark plug job.
 
+**An accident repair is not running cost.** A record marked `accident` still counts for the
+schedule like any other, but `getRunningCost` returns 0 for it, so it stays out of spend
+totals, cost per km, the monthly bars, average-cost estimates and keep-or-sell. One crash
+would otherwise distort all of those for years. `insurancePaid` (only offered alongside
+`accident`) makes `getOwnCost` 0 while `getServiceCost` keeps the bills' value as the
+repair's worth. The Expenses page names the accident total on its own line, outside the totals.
+
 **Nothing may be dated in the future.** `logOdometer` refuses a future reading and
 `addService` pulls a future service date back to today, because either one silently
 corrupts the schedule: a reading dated tomorrow becomes the car's current mileage, and a

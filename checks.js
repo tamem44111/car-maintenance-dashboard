@@ -302,6 +302,27 @@ const Checks = {
         this.ok('a check leaves a postponement standing', !!Storage.getSnooze('test-car', 'Tires'));
         this.seed(A.W);
 
+        // -- an accident repair is a one-off: its parts count, its cost does not --
+        const runBefore = Storage.getServiceExpenses('test-car');
+        const cpkBefore = Storage.getCostPerKm('test-car');
+        Storage.addService({ carId: 'test-car', type: 'Rear Brake Pads', date: day(0), mileage: '', cost: '',
+            accident: true, insurancePaid: true, bills: [{ kind: 'Parts', amount: '2150.01', vendor: 'Test' }] });
+        const crash = Storage.getServices('test-car').find(s => s.accident);
+        this.near('an accident repair adds nothing to maintenance spend', Storage.getServiceExpenses('test-car'), runBefore, 0.001);
+        this.eq('nor to cost per km', Storage.getCostPerKm('test-car'), cpkBefore);
+        this.near('its bills still carry the repair\'s value', Storage.getServiceCost(crash), 2150.01, 0.001);
+        this.eq('paid by insurance, it cost the owner nothing', Storage.getOwnCost(crash), 0);
+        const crashTotals = Storage.getAccidentTotals('test-car');
+        this.ok('and it is totalled on its own', crashTotals.count === 1 && Math.abs(crashTotals.value - 2150.01) < 0.001 && crashTotals.own === 0,
+            JSON.stringify(crashTotals));
+        this.eq('its parts still reset their schedule',
+            Recommendations.getMaintenanceStatus(Storage.getCars()[0], 'Rear Brake Pads').lastServiced, day(0));
+        this.seed(A.W);
+        Storage.addService({ carId: 'test-car', type: 'Suspension', date: day(0), mileage: '', cost: '900', accident: true });
+        this.eq('a self-paid accident repair is the owner\'s cost', Storage.getAccidentTotals('test-car').own, 900);
+        this.near('but still stays out of running spend', Storage.getServiceExpenses('test-car'), runBefore, 0.001);
+        this.seed(A.W);
+
         // -- nothing may be dated in the future --
         // A reading dated tomorrow becomes the car's current mileage; a service dated
         // next year resets its own schedule from a date that has not happened.
@@ -546,6 +567,37 @@ const Checks = {
         this.eq('the picker shows a heading per group',
             D.querySelectorAll('.svc-group-head').length, Recommendations.GROUPS.length);
         App.closeModal();
+
+        // -- an accident repair is labelled wherever its cost shows, and the
+        //    insurance toggle only exists alongside it --
+        Storage.addService({ carId: 'test-car', type: 'Suspension', date: '2026-01-10', mileage: '', cost: '',
+            accident: true, insurancePaid: true, bills: [{ kind: 'Parts', amount: '2150.01', vendor: 'Test' }] });
+        const crashRec = Storage.getServices('test-car').find(s => s.accident);
+        for (const lang of ['en', 'ar']) {
+            I18N.set(lang); I18N.translateDOM();
+            App.navigate('services');
+            const svcPage = D.getElementById('page-services');
+            this.ok(`[${lang}] the services list marks the accident`, !!svcPage.querySelector('.badge-red'));
+            this.ok(`[${lang}] and shows what insurance paid`, svcPage.innerText.includes('2,150'), svcPage.innerText.slice(0, 200));
+            this.eq(`[${lang}] no overflow at 402px: services with an accident`, overflowing(svcPage), []);
+            App.navigate('expenses');
+            const expPage = D.getElementById('page-expenses');
+            this.ok(`[${lang}] expenses name the repair outside the totals`,
+                (D.getElementById('expenses-summary').innerText || '').includes('2,150'));
+            this.eq(`[${lang}] no overflow at 402px: expenses with an accident`, overflowing(expPage), []);
+            this.eq(`[${lang}] no raw template literals: expenses with an accident`, rawTemplates(expPage), []);
+        }
+        I18N.set('en'); I18N.translateDOM();
+        App.openServiceModal(crashRec);
+        App._paintAccident();
+        this.ok('editing it shows both marks ticked', D.getElementById('f-accident').checked && D.getElementById('f-insured').checked);
+        this.ok('the insurance mark shows for an accident', D.getElementById('f-insured-wrap').style.display !== 'none');
+        D.getElementById('f-accident').checked = false;
+        App._paintAccident();
+        this.ok('and hides when it is not one', D.getElementById('f-insured-wrap').style.display === 'none');
+        this.eq('unticking accident drops insurance with it', App._readAccident(), { accident: false, insurancePaid: false });
+        App.closeModal();
+        this.seed(W);
 
         // -- REGRESSION: the empty states that once printed their own source --
         const saved = W.localStorage.getItem('autocare_data');

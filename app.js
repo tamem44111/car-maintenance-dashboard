@@ -193,7 +193,7 @@ const App = {
                 const since = km && s.mileage ? km - parseInt(s.mileage) : null;
                 return `<button type="button" class="repeat-row" onclick="App.repeatService('${s.id}')">
                     <span class="repeat-type">${I18N.t(s.type)}</span>
-                    <span class="repeat-meta">last ${s.date}${since && since > 0 ? ' · ' + since.toLocaleString() + ' km ago' : ''}${Storage.getServiceCost(s) ? ' · ' + Storage.getServiceCost(s).toFixed(0) + ' SAR' : ''}</span>
+                    <span class="repeat-meta">last ${s.date}${since && since > 0 ? ' · ' + since.toLocaleString() + ' km ago' : ''}${Storage.getRunningCost(s) ? ' · ' + Storage.getRunningCost(s).toFixed(0) + ' SAR' : ''}</span>
                 </button>`;
             }).join('')}</div>`;
         this.openModal('Repeat a Service', html, () => this.closeModal());
@@ -209,7 +209,7 @@ const App = {
             this.openServiceModal(null, prev.carId, prev.type);
             setTimeout(() => {
                 const cost = document.getElementById('f-cost');
-                if (cost && !cost.readOnly && !cost.value) cost.value = Storage.getServiceCost(prev) || '';
+                if (cost && !cost.readOnly && !cost.value) cost.value = Storage.getRunningCost(prev) || '';
             }, 80);
         }, 60);
     },
@@ -246,6 +246,9 @@ const App = {
             </div>
             <label class="check-only"><input type="checkbox" id="f-checkonly" ${service&&service.checkOnly?'checked':''} onchange="App._paintCheckOnly()"> ${t('Checked only \u2014 nothing was replaced')}</label>
             <div id="check-only-note" class="field-note" style="display:none"></div>
+            <label class="check-only"><input type="checkbox" id="f-accident" ${service&&service.accident?'checked':''} onchange="App._paintAccident()"> ${t('Accident repair \u2014 kept out of running costs')}</label>
+            <label class="check-only" id="f-insured-wrap" style="display:none"><input type="checkbox" id="f-insured" ${service&&service.insurancePaid?'checked':''} onchange="App._paintAccident()"> ${t('Paid by insurance')}</label>
+            <div id="accident-note" class="field-note" style="display:none"></div>
             <div id="inspection-options" style="display:none">
                 <div class="form-row">
                     <div class="form-group"><label>${t('Result')}</label>
@@ -289,7 +292,7 @@ const App = {
                 const dupe=Storage.findDuplicateService({carId,type:editType,date,mileage},service.id);
                 if(dupe && !confirm(`Another ${editType} record already exists for this car on ${date} at the same mileage.\n\nSave anyway?`)) return;
                 const checkOnly=!!(document.getElementById('f-checkonly')||{}).checked;
-                const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness,checkOnly,
+                const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness,checkOnly,...this._readAccident(),
                     ...(Recommendations.isInspectionType(editType)?insp:{})};
                 if(!checkOnly){
                     if(data.type==='Oil Change') this._handleOilReminder(data);
@@ -317,6 +320,7 @@ const App = {
                 selected.forEach((type,i)=>{
                     const data={carId,type,date,mileage,notes,padThickness,
                         checkOnly: !!(document.getElementById('f-checkonly')||{}).checked,
+                        ...this._readAccident(),
                         cost: bills.length ? (i===0?cost:'0') : cps,
                         bills: (bills.length&&i===0) ? bills : [],
                         ...(Recommendations.isInspectionType(type)?insp:{})};
@@ -333,7 +337,7 @@ const App = {
         });
         // Lock/unlock the cost field to match whether bills are present, and
         // label where the pre-filled odometer came from
-        setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); this._toggleServiceExtras(); this._paintCheckOnly(); }, 40);
+        setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); this._toggleServiceExtras(); this._paintCheckOnly(); this._paintAccident(); }, 40);
     },
 
     // A logged inspection is the authority on when the certificate expires, so it
@@ -398,6 +402,25 @@ const App = {
         if (!box || !note) return;
         note.style.display = box.checked ? 'block' : 'none';
         if (box.checked) note.textContent = t('Kept as a record and any measurement still counts, but the schedule will not treat this as the work being done.');
+    },
+
+    // Insurance only means something for an accident, so it is offered only then
+    // and never saved on its own.
+    _readAccident() {
+        const accident = !!(document.getElementById('f-accident') || {}).checked;
+        return { accident, insurancePaid: accident && !!(document.getElementById('f-insured') || {}).checked };
+    },
+
+    _paintAccident() {
+        const box = document.getElementById('f-accident');
+        const wrap = document.getElementById('f-insured-wrap');
+        const note = document.getElementById('accident-note');
+        if (!box || !wrap || !note) return;
+        wrap.style.display = box.checked ? 'flex' : 'none';
+        note.style.display = box.checked ? 'block' : 'none';
+        if (box.checked) note.textContent = (document.getElementById('f-insured') || {}).checked
+            ? t('Parts still count for the schedule. The bills stay as the repair\'s value; your cost is 0.')
+            : t('Parts still count for the schedule. The cost shows as its own total, not in running costs or cost per km.');
     },
 
     // Show the oil-interval / brake-pad extras only for the service types they belong to
@@ -718,7 +741,7 @@ const App = {
         // Recent services
         const recentEl=document.getElementById('recent-services');
         const recent=services.sort((a,b)=>new Date(b.date)-new Date(a.date)).slice(0,5);
-        recentEl.innerHTML=recent.length?recent.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(s.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:'?'} &middot; ${s.date}</small></div><div style="font-weight:600;font-size:13px">${Storage.getServiceCost(s).toFixed(0)} SAR</div></div>`;}).join(''):`<p class="empty-state">${t("No services yet")}</p>`;
+        recentEl.innerHTML=recent.length?recent.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<div style="display:flex;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(s.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:'?'} &middot; ${s.date}</small></div><div style="font-weight:600;font-size:13px">${Storage.getOwnCost(s).toFixed(0)} SAR</div></div>`;}).join(''):`<p class="empty-state">${t("No services yet")}</p>`;
 
         // Upcoming reminders
         const remEl=document.getElementById('upcoming-reminders');
@@ -856,7 +879,7 @@ const App = {
         const countEl=document.getElementById('svc-count');
         if(countEl) countEl.textContent = q ? `${services.length} / ${total}` : (total? String(total) : '');
         if(!services.length){el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M38 14a2 2 0 010 2.8l3.2 3.2a2 2 0 012.8 0l6-6A10 10 0 0136 28L21.2 42.8a4.2 4.2 0 01-6-6L30 22A10 10 0 0144 8l-6 6z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M24 40l-4 4" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" opacity=".4"/></svg></div><p class="empty-state-text">${q?t("Nothing matched your search"):t("No services recorded")}</p></div>`;return;}
-        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Service")}</th><th>${t("Mileage")}</th><th>${t("Bills")}</th><th>${t("Cost")}</th><th>${t("Actions")}</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td data-label="${t('Date')}">${s.date}</td><td data-label="${t('Car')}">${car?car.year+' '+car.make+' '+car.model:'?'}</td><td data-label="${t('Service')}"><span class="badge badge-green">${I18N.t(s.type)}</span></td><td data-label="${t('Mileage')}">${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td data-label="${t('Bills')}">${Features.billsCell(s)}</td><td data-label="${t('Cost')}"><strong>${Storage.getServiceCost(s).toFixed(0)} SAR</strong></td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this service record?')){Storage.deleteService('${s.id}');Features.cleanupPhotos();App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Service")}</th><th>${t("Mileage")}</th><th>${t("Bills")}</th><th>${t("Cost")}</th><th>${t("Actions")}</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td data-label="${t('Date')}">${s.date}</td><td data-label="${t('Car')}">${car?car.year+' '+car.make+' '+car.model:'?'}</td><td data-label="${t('Service')}"><span class="badge badge-green">${I18N.t(s.type)}</span>${Features.accidentBadge(s)}</td><td data-label="${t('Mileage')}">${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td data-label="${t('Bills')}">${Features.billsCell(s)}</td><td data-label="${t('Cost')}">${Features.costCell(s)}</td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this service record?')){Storage.deleteService('${s.id}');Features.cleanupPhotos();App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Fuel ──
@@ -908,7 +931,7 @@ const App = {
         const fuelEstimated=!!(bd&&bd.fuelEstimated);
         const grandTotal=svcTotal+fuelTotal;
         const monthlyData={};
-        services.forEach(s=>{const m=s.date?s.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+Storage.getServiceCost(s);});
+        services.forEach(s=>{const m=s.date?s.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+Storage.getRunningCost(s);});
         Storage.getFuelLogs(cid).forEach(f=>{const m=f.date?f.date.substring(0,7):'?';monthlyData[m]=(monthlyData[m]||0)+(parseFloat(f.totalCost)||0);});
         const months=Object.keys(monthlyData).sort().slice(-6), maxVal=Math.max(...months.map(m=>monthlyData[m]),1);
 
@@ -922,6 +945,7 @@ const App = {
                     <div class="spend-part"><span class="spend-part-label">${fuelEstimated?t("Fuel (est.)"):t("Fuel")}</span><span class="spend-part-value">${fuelTotal.toFixed(0)}</span></div>
                 </div>
                 ${fuelEstimated?`<div class="spend-note">${t("Fuel is estimated from your consumption setting, not from logged fill-ups.")}</div>`:''}
+                ${Features.accidentNote(cid)?`<div class="spend-note">${Features.accidentNote(cid)}</div>`:''}
             </div>`;
 
         if(typeof Features!=='undefined') Features.renderServiceInsights(cid);
@@ -930,12 +954,12 @@ const App = {
         if(months.length>0) chartHTML=`<div class="chart-container"><h3>${t("Monthly Expenses")}</h3><div class="bar-chart">${months.map(m=>{const pct=(monthlyData[m]/maxVal)*100;const peak=monthlyData[m]===maxVal;return `<div class="bar-group${peak?' is-peak':''}" tabindex="0" title="${m} — ${monthlyData[m].toFixed(0)} SAR"><span class="bar-value">${monthlyData[m].toFixed(0)}</span><div class="bar" style="height:${Math.max(pct,3)}%"></div><span class="bar-label">${m.substring(5)}</span></div>`;}).join('')}</div></div>`;
 
         const allExpenses=[
-            ...services.map(s=>({date:s.date,carId:s.carId,desc:I18N.t(s.type)+((s.bills&&s.bills.length)?` (${s.bills.length} bill${s.bills.length>1?'s':''})`:''),cost:Storage.getServiceCost(s),category:'Service'})),
+            ...services.map(s=>({date:s.date,carId:s.carId,desc:I18N.t(s.type)+((s.bills&&s.bills.length)?` (${s.bills.length} bill${s.bills.length>1?'s':''})`:''),cost:Storage.getOwnCost(s),category:s.accident?'Accident':'Service',svc:s})),
             ...Storage.getFuelLogs(cid).map(f=>({date:f.date,carId:f.carId,desc:t('Fuel')+' ('+f.liters+' L)',cost:parseFloat(f.totalCost||0),category:'Fuel'}))
         ].sort((a,b)=>new Date(b.date)-new Date(a.date));
 
         if(!allExpenses.length){el.innerHTML=chartHTML+'<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><circle cx="32" cy="32" r="20" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M32 20v24M26 24c0-2 2.7-3.5 6-3.5s6 1.5 6 3.5-2.7 3.5-6 3.5-6 1.5-6 3.5 2.7 3.5 6 3.5 6 1.5 6 3.5c0 2-2.7 3.5-6 3.5s-6-1.5-6-3.5" stroke="var(--text3)" stroke-width="2" fill="none" stroke-linecap="round"/></svg></div><p class="empty-state-text">${t("No expenses yet")}</p></div>';return;}
-        el.innerHTML=chartHTML+`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Description")}</th><th>${t("Category")}</th><th>${t("Cost")}</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td data-label="${t('Date')}">${e.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Description')}">${e.desc}</td><td data-label="${t('Category')}"><span class="badge ${e.category==='Fuel'?'badge-orange':'badge-green'}">${t(e.category)}</span></td><td data-label="${t('Cost')}"><strong>${e.cost.toFixed(0)} SAR</strong></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=chartHTML+`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Description")}</th><th>${t("Category")}</th><th>${t("Cost")}</th></tr></thead><tbody>${allExpenses.map(e=>{const car=cars.find(c=>c.id===e.carId);return `<tr><td data-label="${t('Date')}">${e.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Description')}">${e.desc}</td><td data-label="${t('Category')}"><span class="badge ${e.category==='Fuel'?'badge-orange':e.category==='Accident'?'badge-red':'badge-green'}">${t(e.category)}</span></td><td data-label="${t('Cost')}">${e.svc?Features.costCell(e.svc):`<strong>${e.cost.toFixed(0)} SAR</strong>`}</td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Reminders ──
