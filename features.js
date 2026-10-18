@@ -166,10 +166,12 @@ const Features = {
     // insurance-paid one reads 0 with the bills' value beside it.
     costCell(service) {
         const own = Storage.getOwnCost(service);
+        const value = Storage.getServiceCost(service);
         const sub = service.insurancePaid
-            ? t('Insurance paid {v} SAR', { v: Math.round(Storage.getServiceCost(service)).toLocaleString() })
+            ? (value ? t('Insurance paid {v} SAR', { v: Math.round(value).toLocaleString() }) : t('Paid by insurance'))
             : service.accident ? t('Not in running costs') : '';
-        return `<strong>${own.toFixed(0)} SAR</strong>${sub ? `<small class="cost-sub">${sub}</small>` : ''}`;
+        // one wrapper, so the phone card layout keeps the note under its amount
+        return `<span class="cost-cell"><strong>${own.toFixed(0)} SAR</strong>${sub ? `<small class="cost-sub">${sub}</small>` : ''}</span>`;
     },
 
     accidentBadge(service) {
