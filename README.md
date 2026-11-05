@@ -228,8 +228,10 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
 
 ## Open items
 
-**The schedule data is wrong, and verifiably so.** See "Verified Ford intervals" below. Left in
-place by the owner's decision until the rebuild; he knows which warnings to ignore.
+**Parts of the schedule table are still wrong.** See "Verified Ford intervals" below. Air filter,
+cabin filter, coolant and the brake check were corrected for the Taurus in November 2026, by the
+owner's decision. Spark plugs and transmission are overridden on his car by custom intervals,
+so their table rows do nothing for him and are left for the rebuild. Battery is still invented.
 
 **The owner's own data:**
 
@@ -248,26 +250,27 @@ Checked 23 Aug 2026 against the actual owner's manual:
 `https://www.fordservicecontent.com/Ford_Content/catalog/owner_guides/13tauom3e.pdf`
 (local copy: `~/Downloads/taurus-2013-owner-manual.pdf`, 547 pages).
 
-**The table in `recommendations.js` does not match it.** Every figure below is quoted from
-the manual with its page number. The code was left unchanged by the owner's decision — the
-rebuild inherits these numbers instead.
+**The table in `recommendations.js` did not match it.** Every figure below is quoted from the
+manual with its page number. The rows marked *fixed* were corrected in November 2026 for the
+Taurus only; the climate multiplier then takes 20% off, so on his car the air filter is 38,400
+km, the cabin filter 25,600 km and coolant 64,000 km. The other rows wait for the rebuild.
 
 ### Normal Scheduled Maintenance (p. 382–383)
 
 | Item | Ford | `recommendations.js` | Error |
 |---|---|---|---|
 | Spark plugs | 100,000 mi / **160,000 km** | 48,000 km | 3.3x too short |
-| Engine air filter | 30,000 mi / **48,000 km** | 15,000 km | 3.2x too short |
-| Cabin air filter | 20,000 mi / **32,000 km** | 15,000 km (universal) | 2.1x too short |
+| Engine air filter | 30,000 mi / **48,000 km** | 48,000 km | *fixed* |
+| Cabin air filter | 20,000 mi / **32,000 km** | 32,000 km | *fixed* |
 | Automatic transmission fluid + filter | 150,000 mi / **240,000 km** | 60,000 km | 4x too short |
-| Engine coolant | initial 6 yr or 160,000 km, **then 3 yr or 80,000 km** | 50,000 km / 36 mo | 1.6x too short |
+| Engine coolant | initial 6 yr or 160,000 km, **then 3 yr or 80,000 km** | 80,000 km / 36 mo | *fixed* |
 | Accessory drive belt | inspect at 160,000 km, replace by 240,000 km | *absent* | missing |
 | Battery | **not a scheduled item** | 80,000 km / 48 mo | invented |
-| Brake inspection | **at every oil change** | 20,000 km / 12 mo | too *relaxed* |
+| Brake inspection | **at every oil change** | follows the oil interval | *fixed* |
 | Tyre rotation | at every oil change | 12,000 km / 6 mo | acceptable |
 
-Note the direction of the brake row. Every other error nags too early; on brakes — the one
-that matters at speed — the app is less cautious than Ford.
+Note the direction of the brake row. Every other error nagged too early; on brakes — the one
+that matters at speed — the app was less cautious than Ford.
 
 ### Oil: there is no fixed interval (p. 381)
 

@@ -689,6 +689,7 @@ const Storage = {
             recTypes.forEach(type => {
                 const st = Recommendations.getMaintenanceStatus(c, type);
                 if (!st || st.status === 'unknown') return;   // no record, so no date to forecast from
+                if (st.rec.withOil) return;                   // done during the oil change, not billed
                 // Whichever comes first, as everywhere else. Reading the time limit
                 // alone left out everything due by distance on a car doing 125 km a day.
                 const firstIn = Math.max(0, st.dueDays);

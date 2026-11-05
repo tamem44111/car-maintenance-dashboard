@@ -30,12 +30,13 @@ const Recommendations = {
             },
             'taurus': {
                 'Oil Change':        { km: 12000, months: 6, note: 'Ford Taurus owner manual' },
-                'Air Filter':        { km: 15000, months: 12, note: 'Ford Taurus owner manual' },
+                'Air Filter':        { km: 48000, months: 36, note: 'Ford Taurus owner manual p.382 (30,000 mi)' },
+                'Cabin Air Filter':  { km: 32000, months: 24, note: 'Ford Taurus owner manual p.382 (20,000 mi)' },
                 'Spark Plugs':       { km: 48000, months: 48, note: 'Ford Taurus - iridium plugs recommended' },
                 'Tire Rotation':     { km: 12000, months: 6, note: 'Ford Taurus owner manual' },
-                'Brake Inspection':  { km: 20000, months: 12, note: 'Ford Taurus owner manual' },
+                'Brake Inspection':  { km: 12000, months: 6, withOil: true, note: 'Ford Taurus owner manual p.382: at every oil change' },
                 'Transmission':      { km: 60000, months: 48, note: 'Ford Taurus owner manual' },
-                'Coolant Flush':     { km: 50000, months: 36, note: 'Ford Taurus owner manual' },
+                'Coolant Flush':     { km: 80000, months: 36, note: 'Ford Taurus owner manual p.383 (after the first change)' },
                 'Battery':           { km: 80000, months: 48, note: 'Ford Taurus owner manual' },
             },
             'explorer': {
@@ -181,6 +182,12 @@ const Recommendations = {
         } else {
             const mfr = this.getForService(car.make, car.model, serviceType);
             if (mfr) rec = { ...mfr, source: 'manufacturer' };
+        }
+        // Ford gives the brake check no distance of its own: it comes round with the oil,
+        // on whatever interval the owner runs his oil at.
+        if (rec && rec.source === 'manufacturer' && rec.withOil) {
+            const oil = this.getEffective(car, 'Oil Change');
+            return oil ? { ...rec, km: oil.km, months: oil.months } : rec;
         }
         // Climate shortens *manufacturer guidance*, never a figure the owner chose
         // themselves. Reducing an explicit 5,000 km to 4,000 would mean the number

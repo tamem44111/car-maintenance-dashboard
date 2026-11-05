@@ -61,7 +61,7 @@ const Checks = {
             services: [
                 // recent, comfortably inside its 12,000 km interval -> ok
                 { id: 's-oil', carId: 'test-car', type: 'Oil Change', date: day(30), mileage: '96700', cost: '200' },
-                // 15,000 km interval last done at 62,000 -> due at 77,000, so ~23,000 km overdue
+                // 15,000 km interval (set in seed) last done at 62,000 -> due at 77,000, so ~23,000 km overdue
                 { id: 's-air', carId: 'test-car', type: 'Air Filter', date: day(350), mileage: '62000', cost: '120' }
             ],
             // one reminder so the Arabic sweep actually reaches the Upcoming Reminders card
@@ -82,7 +82,10 @@ const Checks = {
         W.localStorage.setItem('autocare_data', JSON.stringify(this.fixture()));
         W.localStorage.setItem('autocare_climate', 'normal');
         W.localStorage.setItem('autocare_lang', 'en');
-        W.localStorage.removeItem('autocare_custom_recs');
+        // An interval short enough to be overdue inside the fixture's 40,000 km of
+        // history. The suite is testing the schedule's logic, not Ford's figures, which
+        // have their own check.
+        W.localStorage.setItem('autocare_custom_recs', JSON.stringify({ 'test-car': { 'Air Filter': { km: 15000, months: 12, note: 'fixture' } } }));
     },
 
     // ═══════════════ logic checks ═══════════════
@@ -987,6 +990,24 @@ const Checks = {
             tapSave();
             Features.openTireModal('test-car');
             this.eq('a quote survives reopening the form', D.getElementById('f-tire-brand').value, 'Brand "X" <new>');
+        });
+
+        // -- the Taurus table, from the owner's manual pp. 382-383 --
+        await T('the Taurus schedule', async () => {
+            W.localStorage.removeItem('autocare_custom_recs');
+            const rec = type => Recommendations.getEffective(firstCar(), type);
+            this.eq('air filter is 30,000 miles', rec('Air Filter').km, 48000);
+            this.eq('cabin filter is 20,000 miles', rec('Cabin Air Filter').km, 32000);
+            this.eq('coolant is 80,000 km or 3 years', [rec('Coolant Flush').km, rec('Coolant Flush').months], [80000, 36]);
+            W.localStorage.setItem('autocare_climate', 'severe');
+            this.eq('less 20% for the heat', [rec('Air Filter').km, rec('Cabin Air Filter').km, rec('Coolant Flush').km], [38400, 25600, 64000]);
+            custom('Oil Change', 7000, 6);
+            this.eq('brakes are checked at every oil change', [rec('Brake Inspection').km, rec('Brake Inspection').months], [7000, 6]);
+            Storage.addService({ carId: 'test-car', type: 'Brake Inspection', date: day(5), mileage: '99500', cost: '' });
+            this.ok('which adds nothing to the forecast, being part of the oil service',
+                !Storage.getCostForecast('all', 6).items.some(i => i.type === 'Brake Inspection'));
+            custom('Cabin Air Filter', 20000, 12);
+            this.eq('a figure the owner set still wins', rec('Cabin Air Filter').km, 20000);
         });
 
         // -- forecast --
