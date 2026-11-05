@@ -146,6 +146,18 @@ const Recommendations = {
         return raw ? JSON.parse(raw) : {};
     },
 
+    // getEffective runs for every item on every screen. Read-only, like Storage._read.
+    _customRaw: null,
+    _customData: {},
+    _readCustom() {
+        const raw = localStorage.getItem('autocare_custom_recs');
+        if (raw !== this._customRaw) {
+            this._customRaw = raw;
+            this._customData = raw ? JSON.parse(raw) : {};
+        }
+        return this._customData;
+    },
+
     saveCustom(carId, serviceType, km, months, note) {
         const custom = this.getCustom();
         if (!custom[carId]) custom[carId] = {};
@@ -162,7 +174,7 @@ const Recommendations = {
     },
 
     getEffective(car, serviceType) {
-        const custom = this.getCustom();
+        const custom = this._readCustom();
         let rec = null;
         if (custom[car.id] && custom[car.id][serviceType]) {
             rec = { ...custom[car.id][serviceType], source: 'custom' };
@@ -261,8 +273,10 @@ const Recommendations = {
         const currentKm = Storage.getEffectiveMileage(car);
         // A record marked "checked only" is an observation, not the job being done.
         // Counting it would reset the interval for work nobody performed.
+        // Four new tyres are a fresh start for rotation too. Counting only rotations
+        // asked for a rotation on a three-week-old set.
         const services = Storage.getServices(car.id)
-            .filter(s => s.type === type && !s.checkOnly)
+            .filter(s => (s.type === type || (type === 'Tire Rotation' && s.type === 'Tires')) && !s.checkOnly)
             .sort((a, b) => new Date(b.date) - new Date(a.date));
         const last = services[0];
         const months = rec.months || 12;
@@ -301,21 +315,26 @@ const Recommendations = {
         const usedPct = Math.max(kmUsedPct, timeUsedPct);
         const kmRatio = kmRemaining / rec.km;
         const timeRatio = daysRemaining / totalDays;
-        const binding = timeRatio < kmRatio ? 'time' : 'km';
+        let binding = timeRatio < kmRatio ? 'time' : 'km';
 
         let status = 'ok';
-        if (kmRemaining <= 0 || daysRemaining <= 0) status = 'overdue';
+        if (kmRemaining <= 0 || daysRemaining < 0) status = 'overdue';
         else if (kmRemaining <= rec.km * 0.15 || daysRemaining <= 30) status = 'soon';
 
         // ── Predict WHEN the km threshold will be reached, using the car's driving rate.
         // This is what lets a km-based service produce a real calendar due date.
+        // Without a km on the record there is nothing to count from: the distance above
+        // is measured from today's odometer, so it would never get any closer.
         const rate = Storage.getDailyKmRate(car.id);
         let kmDaysRemaining = null, kmEtaDate = null;
-        if (rate && rate > 0) {
+        if (rate && rate > 0 && lastKm > 0) {
             kmDaysRemaining = Math.round(kmRemaining / rate);
+            // Which limit actually arrives first. Fractions of the interval tie right
+            // after a service, which read "in 6 months" with eight weeks of km left.
+            binding = daysRemaining < kmDaysRemaining ? 'time' : 'km';
             const eta = new Date();
             eta.setDate(eta.getDate() + kmDaysRemaining);
-            kmEtaDate = eta.toISOString().split('T')[0];
+            kmEtaDate = Storage.dateStr(eta);
             // A km threshold the driver will hit within a month counts as due soon
             if (status === 'ok' && kmDaysRemaining <= 30) status = 'soon';
         }
@@ -328,7 +347,8 @@ const Recommendations = {
             dueDays = kmDaysRemaining;
         }
 
-        const fmtDays = d => d <= 0 ? T('{d} days overdue', {d: Math.abs(d)})
+        const fmtDays = d => d < 0 ? T('{d} days overdue', {d: Math.abs(d)})
+            : d === 0 ? T('Due today')
             : d <= 60 ? T('in {d} days', {d})
             : T('in {m} months', {m: Math.round(d / 30)});
 
@@ -339,20 +359,56 @@ const Recommendations = {
             detail = kmRemaining <= 0 ? T('{km} km over', {km: Math.abs(kmRemaining).toLocaleString()})
                 : T('{km} km left', {km: kmRemaining.toLocaleString()});
             // add the ETA so a km-based item still reads as a date
-            if (kmDaysRemaining !== null && kmRemaining > 0) detail += ' · ~' + fmtDays(kmDaysRemaining).replace('in ', '').replace('خلال ', '');
+            if (kmDaysRemaining > 0 && kmRemaining > 0) detail += ' · ~' + fmtDays(kmDaysRemaining).replace('in ', '').replace('خلال ', '');
         }
 
         return {
             type, rec, status, binding, detail,
             kmRemaining, daysRemaining, usedPct: Math.round(usedPct),
-            nextKm, nextDate: nextDate.toISOString().split('T')[0],
+            nextKm, hasKm: lastKm > 0, nextDate: nextDate.toISOString().split('T')[0],
             kmEtaDate, kmDaysRemaining, dueDate, dueDays, rate,
             lastServiced: last ? last.date : null
         };
     },
 
-    createReminderFromService(car, serviceType, serviceMileage, serviceDate) {
+    // Is this the most recent time the job was done? Only that record speaks for the
+    // car. Correcting an old one must not rewrite today's interval or reminder: that
+    // is how saving an August oil record put the car back on 5,000 km and an already
+    // overdue reminder.
+    isNewest(carId, type, date, ignoreId) {
+        return !Storage.getServices(carId).some(s =>
+            s.id !== ignoreId && s.type === type && !s.checkOnly && s.date > date);
+    },
+
+    // An automatic reminder is a view of the schedule, not a second opinion. Each one
+    // used to keep its own copy of the dates, which drifted: the oil reminder froze a
+    // km estimate as a calendar deadline and called it overdue with 551 km left.
+    // Follows the schedule on every render, so no change to a record, an interval or
+    // the climate setting can leave the two disagreeing. A reminder the owner pushed
+    // back keeps the date he chose.
+    syncAutoReminders() {
+        const cars = Storage.getCars();
+        const updates = [];
+        Storage.getReminders('all').forEach(r => {
+            if (!r.autoCreated || r.autoDoc || r.retest || r.completed || r.snoozed) return;
+            if (!this.ALL_TYPES.includes(r.type)) return;
+            const car = cars.find(c => c.id === r.carId);
+            const st = car ? this.getMaintenanceStatus(car, r.type) : null;
+            if (!st || st.status === 'unknown') return;
+            const dueMileage = st.hasKm ? String(st.nextKm) : '';
+            if (r.dueDate !== st.nextDate || String(r.dueMileage || '') !== dueMileage) {
+                updates.push({ id: r.id, dueDate: st.nextDate, dueMileage });
+            }
+        });
+        if (!updates.length) return;
+        const data = Storage.getAll();
+        updates.forEach(u => Object.assign(data.reminders.find(r => r.id === u.id), u));
+        Storage.save(data);
+    },
+
+    createReminderFromService(car, serviceType, serviceMileage, serviceDate, ignoreId) {
         if (serviceType === 'Oil Change') return;
+        if (!this.isNewest(car.id, serviceType, serviceDate, ignoreId)) return;
 
         const rec = this.getEffective(car, serviceType);
         if (!rec || !rec.km) return;
@@ -363,7 +419,7 @@ const Recommendations = {
 
         const existing = Storage.getReminders(car.id)
             .filter(r => r.type === serviceType && !r.completed && r.autoCreated);
-        existing.forEach(r => Storage.deleteReminder(r.id));
+        existing.forEach(r => Storage.dropReminder(r.id));
 
         Storage.addReminder({
             carId: car.id,

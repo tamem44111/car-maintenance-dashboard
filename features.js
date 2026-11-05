@@ -59,7 +59,7 @@ const Features = {
                     photos
                 };
                 const json = JSON.stringify(payload, null, 2);
-                const name = `autocare-backup-${new Date().toISOString().split('T')[0]}.json`;
+                const name = `autocare-backup-${Storage.today()}.json`;
                 return this._deliverBackup(json, name).then(how => {
                     // Backing out of the share sheet is a decision, not a backup
                     if (!how) return;
@@ -109,54 +109,111 @@ const Features = {
             .catch(err => (err && err.name === 'AbortError') ? null : download());
     },
 
+    // Reads the file and asks what to do with it. The choice used to be a system
+    // prompt where Cancel meant "replace everything", so backing out wiped the phone.
+    _pendingImport: null,
+
     importData(file) {
-        const reader = new FileReader();
-        reader.onload = (e) => {
-            let data;
-            try { data = JSON.parse(e.target.result); }
-            catch (err) { return alert('That file is not readable: ' + err.message); }
-            if (!data || !data.cars || !data.services || !data.reminders) return alert('That does not look like an AutoCare backup.');
+        if (!file) return Promise.resolve();
+        return new Promise(resolve => {
+            const reader = new FileReader();
+            reader.onload = (e) => {
+                let data = null;
+                try { data = JSON.parse(e.target.result); }
+                catch (err) { alert(t('That file is not readable.')); return resolve(); }
+                if (!data || !Array.isArray(data.cars) || !Array.isArray(data.services) || !Array.isArray(data.reminders)) {
+                    alert(t('That does not look like an AutoCare backup.'));
+                    return resolve();
+                }
+                this._showImportChoice(data);
+                this._pendingImport = data;
+                resolve();
+            };
+            reader.onerror = () => { alert(t('Could not read that file.')); resolve(); };
+            reader.readAsText(file);
+        });
+    },
 
-            const merge = confirm('Merge with existing data? (Cancel = Replace all)');
+    _showImportChoice(data) {
+        const newest = list => (list || []).map(s => s.date).filter(Boolean).sort().pop() || '';
+        const inFile = newest(data.services);
+        const onPhone = newest(Storage.getServices('all'));
+        // Several backups look alike in Files; picking an older one should not be silent
+        const older = onPhone && inFile < onPhone;
+        const html = `
+            <p class="doc-intro">${t('This file has {n} service records, the latest on {d}.', { n: data.services.length, d: inFile || '—' })}</p>
+            ${older ? `<div class="odo-warning imp-warn">${t('This phone has newer records, up to {d}. Replacing removes them.', { d: onPhone })}</div>` : ''}
+            <div class="imp-choices">
+                <button type="button" class="btn btn-primary" id="imp-replace" onclick="Features._applyImport('replace')">${t('Replace everything on this phone')}</button>
+                <small class="field-note">${t('To restore a backup. The records and settings here become the ones in the file.')}</small>
+                <button type="button" class="btn btn-secondary" id="imp-merge" onclick="Features._applyImport('merge')">${t('Add to what is here')}</button>
+                <small class="field-note">${t('Keeps everything on this phone and adds only what it does not have.')}</small>
+            </div>`;
+        App.openModal('Import Backup', html, null);
+        document.getElementById('modal-save').style.display = 'none';
+    },
+
+    _applyImport(mode) {
+        const data = this._pendingImport;
+        if (!data) return Promise.resolve();
+        this._pendingImport = null;
+        let settingsRestored = 0;
+        if (mode === 'merge') {
             const existing = Storage.getAll();
-            if (merge) {
-                const mergeBy = (key) => {
-                    if (!Array.isArray(data[key])) return;
-                    if (!Array.isArray(existing[key])) existing[key] = [];
-                    const seen = new Set(existing[key].map(x => x.id));
-                    data[key].forEach(x => { if (!seen.has(x.id)) existing[key].push(x); });
-                };
-                ['cars', 'services', 'reminders', 'fuelLogs', 'odometerLogs', 'trash', 'snoozes'].forEach(mergeBy);
-                Storage.save(existing);
-            } else {
-                Storage.save({
-                    cars: data.cars, services: data.services, reminders: data.reminders,
-                    fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [], trash: data.trash || [],
-                    snoozes: data.snoozes || []
-                });
+            const mergeBy = (key) => {
+                if (!Array.isArray(data[key])) return;
+                if (!Array.isArray(existing[key])) existing[key] = [];
+                const seen = new Set(existing[key].map(x => x.id));
+                data[key].forEach(x => { if (!seen.has(x.id)) existing[key].push(x); });
+            };
+            ['cars', 'services', 'reminders', 'fuelLogs', 'odometerLogs', 'trash', 'snoozes'].forEach(mergeBy);
+            Storage.save(existing);
+            // Adding never overrides: an interval this phone already has stays
+            if (data.customRecs) {
+                const mine = Recommendations.getCustom();
+                Object.entries(data.customRecs).forEach(([carId, recs]) => { mine[carId] = { ...recs, ...(mine[carId] || {}) }; });
+                localStorage.setItem('autocare_custom_recs', JSON.stringify(mine));
             }
+        } else {
+            Storage.save({
+                cars: data.cars, services: data.services, reminders: data.reminders,
+                fuelLogs: data.fuelLogs || [], odometerLogs: data.odometerLogs || [], trash: data.trash || [],
+                snoozes: data.snoozes || []
+            });
             if (data.customRecs) localStorage.setItem('autocare_custom_recs', JSON.stringify(data.customRecs));
-            const settingsRestored = this.applySettings(data.settings);
+            settingsRestored = this.applySettings(data.settings);
+        }
 
-            // Wait for the images to actually land before reporting success
-            const entries = Object.entries(data.photos || {});
-            Promise.all(entries.map(([id, d]) => d ? Photos.put(id, d).then(() => true).catch(() => false) : Promise.resolve(false)))
-                .then(results => {
-                    const ok = results.filter(Boolean).length;
-                    const failed = results.length - ok;
-                    App.renderPage(App.currentPage);
-                    alert(
-                        'Import complete\n\n' +
-                        Storage.getCars().length + ' car(s)\n' +
-                        Storage.getServices('all').length + ' service record(s)\n' +
-                        ok + ' receipt photo(s) restored' + (failed ? ' (' + failed + ' failed)' : '') + '\n' +
-                        (settingsRestored ? 'Settings restored' : 'No settings in this file — check climate mode in Settings')
-                    );
-                })
-                .catch(() => { App.renderPage(App.currentPage); alert('Records imported, but some receipt photos could not be restored.'); });
-        };
-        reader.onerror = () => alert('Could not read that file.');
-        reader.readAsText(file);
+        // Wait for the images to actually land before reporting success
+        const entries = Object.entries(data.photos || {});
+        return Promise.all(entries.map(([id, d]) => d ? Photos.put(id, d).then(() => true).catch(() => false) : Promise.resolve(false)))
+            .then(results => {
+                const ok = results.filter(Boolean).length;
+                const failed = results.length - ok;
+                if (mode !== 'merge') {
+                    // The phone now matches a file that exists, so there is nothing to nag about
+                    Storage.markBackedUp();
+                    this.cleanupPhotos();
+                }
+                // Closing here is what stops Settings, which the import ran from, being
+                // saved over the top of it. That is how the fuel setting went missing.
+                App.closeModal();
+                App.paintLang();
+                App.navigate(App.currentPage);
+                alert(
+                    t('Import complete') + '\n\n' +
+                    t('{n} car(s)', { n: Storage.getCars().length }) + '\n' +
+                    t('{n} service record(s)', { n: Storage.getServices('all').length }) + '\n' +
+                    t('{n} receipt photo(s)', { n: ok }) + (failed ? ' ' + t('({n} could not be read)', { n: failed }) : '') + '\n' +
+                    (mode === 'merge' ? t('Settings left as they were')
+                        : settingsRestored ? t('Settings restored') : t('No settings in this file — check climate mode in Settings'))
+                );
+            })
+            .catch(() => {
+                App.closeModal();
+                App.navigate(App.currentPage);
+                alert(t('Records imported, but some receipt photos could not be restored.'));
+            });
     },
 
     // ── Bills & Receipts ──
@@ -201,15 +258,17 @@ const Features = {
         b = b || {};
         const rid = 'br_' + Math.random().toString(36).slice(2, 8);
         const pids = Photos.idsFor(b);
-        return `<div class="bill-row" data-photos="${pids.join(',')}">
+        // What the form doesn't show still belongs to the bill, so it rides along on
+        // the row. Rebuilding a bill from the form alone re-dated every one of them.
+        return `<div class="bill-row" data-photos="${pids.join(',')}" data-id="${esc(b.id)}" data-date="${esc(b.date)}" data-startkm="${esc(b.startKm)}">
             <div class="bill-line bill-line-1">
                 <select class="bill-kind">${this.BILL_KINDS.map(k => `<option value="${k}" ${b.kind === k ? 'selected' : ''}>${I18N.t(k)}</option>`).join('')}</select>
-                <input type="text" class="bill-label" placeholder="${t('What is it for? e.g. Spark plugs')}" value="${(b.label || '').replace(/"/g, '&quot;')}">
+                <input type="text" class="bill-label" placeholder="${t('What is it for? e.g. Spark plugs')}" value="${esc(b.label)}">
                 <input type="number" class="bill-amount" placeholder="0" step="0.01" value="${b.amount || ''}" oninput="Features.recalcBillTotal()">
                 <button type="button" class="bill-del" title="${t('Remove this bill')}" onclick="Features.removeBillRow(this)">&times;</button>
             </div>
             <div class="bill-line bill-line-2">
-                <input type="text" class="bill-vendor" placeholder="${t('Shop / store name')}" value="${(b.vendor || '').replace(/"/g, '&quot;')}">
+                <input type="text" class="bill-vendor" placeholder="${t('Shop / store name')}" value="${esc(b.vendor)}">
                 <input type="number" class="bill-wmonths" placeholder="${t('Warranty months')}" value="${b.warrantyMonths || ''}">
                 <input type="number" class="bill-wkm" placeholder="${t('Warranty km')}" value="${b.warrantyKm || ''}">
             </div>
@@ -229,7 +288,7 @@ const Features = {
                 <span class="bills-title">${t("Bills & Receipts")}</span>
                 <button type="button" class="btn btn-secondary btn-sm" onclick="Features.addBillRow()">${t("+ Add Bill")}</button>
             </div>
-            <p class="bills-hint">Add one row per bill — parts from one shop, labour from another. Leave this empty and just type the cost below if you have no bill.</p>
+            <p class="bills-hint">${t('Add one row per bill — parts from one shop, labour from another. Leave this empty and just type the cost below if you have no bill.')}</p>
             <div id="bills-list">${rows}</div>
             <div id="bills-total" class="bills-total"></div>
         </div>`;
@@ -298,15 +357,16 @@ const Features = {
             const photoIds = (row.getAttribute('data-photos') || '').split(',').filter(Boolean);
             // keep a row only if it carries something meaningful
             if (!amount && !label && !vendor && !photoIds.length) return;
+            const known = row.getAttribute('data-id');
             out.push({
-                id: 'bl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                id: known || 'bl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
                 kind: row.querySelector('.bill-kind').value,
                 label, vendor, photoIds,
                 amount: amount || '0',
                 warrantyMonths: wm || '',
                 warrantyKm: wk || '',
-                startKm: startKm || '',
-                date: document.getElementById('f-date') ? document.getElementById('f-date').value : ''
+                startKm: known ? (row.getAttribute('data-startkm') || '') : (startKm || ''),
+                date: row.getAttribute('data-date') || (document.getElementById('f-date') ? document.getElementById('f-date').value : '')
             });
         });
         return out;
@@ -321,13 +381,13 @@ const Features = {
         const costField = document.getElementById('f-cost');
         const note = document.getElementById('cost-note');
         if (rows.length) {
-            el.innerHTML = `<span>Total from ${rows.length} bill${rows.length > 1 ? 's' : ''}</span><strong>${total.toFixed(2)} SAR</strong>`;
+            el.innerHTML = `<span>${t(rows.length > 1 ? 'Total from {n} bills' : 'Total from {n} bill', { n: rows.length })}</span><strong>${total.toFixed(2)} SAR</strong>`;
             if (costField) { costField.value = total.toFixed(2); costField.readOnly = true; costField.classList.add('input-locked'); }
-            if (note) note.textContent = 'Calculated from the bills above.';
+            if (note) note.textContent = t('Calculated from the bills above.');
         } else {
             el.innerHTML = '';
             if (costField) { costField.readOnly = false; costField.classList.remove('input-locked'); }
-            if (note) note.textContent = 'No bill? Just type the amount you paid.';
+            if (note) note.textContent = t('No bill? Just type the amount you paid.');
         }
     },
 
@@ -360,21 +420,21 @@ const Features = {
             const cls = clsMap[warranty.status] || 'green';
             const label = labelMap[warranty.status] || 'Active';
             const terms = [];
-            if (warranty.months) terms.push(`${warranty.months} months`);
-            if (warranty.km) terms.push(`${warranty.km.toLocaleString()} km`);
+            if (warranty.months) terms.push(t('{n} months', { n: warranty.months }));
+            if (warranty.km) terms.push(t('{km} km', { km: warranty.km.toLocaleString() }));
             return `<div class="warranty-card wc-${cls}">
                 <div class="wc-head">
                     <div>
-                        <div class="wc-title">${bill.label || I18N.t(bill.kind)}</div>
+                        <div class="wc-title">${esc(bill.label) || I18N.t(bill.kind)}</div>
                         <div class="wc-sub">${car ? car.make + ' ' + car.model : ''} &middot; ${I18N.t(bill.serviceType)}</div>
                     </div>
-                    <span class="badge badge-${cls}">${label}</span>
+                    <span class="badge badge-${cls}">${t(label)}</span>
                 </div>
                 <div class="wc-remaining">${warranty.detail}</div>
                 <div class="wc-meta">
-                    <div class="wc-meta-row"><span>${t("Shop")}</span><span>${bill.vendor || '—'}</span></div>
-                    <div class="wc-meta-row"><span>${t("Paid")}</span><span>${(parseFloat(bill.amount) || 0).toFixed(0)} SAR on ${bill.date || bill.serviceDate || '—'}</span></div>
-                    <div class="wc-meta-row"><span>${t("Cover")}</span><span>${terms.join(' or ') || '—'}</span></div>
+                    <div class="wc-meta-row"><span>${t("Shop")}</span><span>${esc(bill.vendor) || '—'}</span></div>
+                    <div class="wc-meta-row"><span>${t("Paid")}</span><span>${t('{a} SAR on {d}', { a: (parseFloat(bill.amount) || 0).toFixed(0), d: bill.date || bill.serviceDate || '—' })}</span></div>
+                    <div class="wc-meta-row"><span>${t("Cover")}</span><span>${terms.join(' / ') || '—'}</span></div>
                     ${warranty.expiryDate ? `<div class="wc-meta-row"><span>${t("Until")}</span><span>${warranty.expiryDate}</span></div>` : ''}
                     ${warranty.endKm ? `<div class="wc-meta-row"><span>${t("Or at")}</span><span>${warranty.endKm.toLocaleString()} km</span></div>` : ''}
                 </div>
@@ -386,8 +446,8 @@ const Features = {
         };
 
         el.innerHTML = `
-            ${active.length ? `<div class="warranty-section-title">Still covered (${active.length})</div><div class="warranty-grid">${active.map(card).join('')}</div>` : ''}
-            ${expired.length ? `<div class="warranty-section-title warranty-section-muted">Expired (${expired.length})</div><div class="warranty-grid">${expired.map(card).join('')}</div>` : ''}`;
+            ${active.length ? `<div class="warranty-section-title">${t('Still covered')} (${active.length})</div><div class="warranty-grid">${active.map(card).join('')}</div>` : ''}
+            ${expired.length ? `<div class="warranty-section-title warranty-section-muted">${t('Expired')} (${expired.length})</div><div class="warranty-grid">${expired.map(card).join('')}</div>` : ''}`;
     },
 
     // ── Odometer Update ──
@@ -396,32 +456,17 @@ const Features = {
         if (!cars.length) return alert(t('Please add a car first.'));
         const target = carId || cars[0].id;
 
-        const panel = (cid) => {
-            const car = cars.find(c => c.id === cid);
-            if (!car) return '';
-            const proj = Storage.getProjectedMileage(car);
-            const fresh = Storage.getOdometerFreshness(car);
-            if (!proj.lastKm) return `<div class="odo-panel"><div class="odo-hint">No reading recorded yet — enter the number on your dashboard now.</div></div>`;
-            const rateTxt = proj.rate ? `${proj.rate.toFixed(0)} km/day average` : 'not enough history to estimate yet';
-            return `<div class="odo-panel">
-                <div class="odo-row"><span>Last confirmed</span><strong>${proj.lastKm.toLocaleString()} km</strong></div>
-                <div class="odo-row"><span>Recorded</span><strong>${proj.lastDate || '—'}${fresh.daysSince !== null ? ` (${fresh.daysSince}d ago)` : ''}</strong></div>
-                ${proj.estimated ? `<div class="odo-row odo-est"><span>Estimated today</span><strong>~ ${proj.km.toLocaleString()} km</strong></div>` : ''}
-                <div class="odo-hint">${rateTxt}</div>
-            </div>`;
-        };
-
         const html = `
-            <p class="odo-intro">Enter the number shown on your car's dashboard. This keeps every km-based service reminder counting down accurately.</p>
-            <div class="form-group"><label>Car</label>
+            <p class="odo-intro">${t("Enter the number shown on your car's dashboard. This keeps every km-based service reminder counting down accurately.")}</p>
+            <div class="form-group"><label>${t('Car')}</label>
                 <select id="f-odo-car" onchange="Features._refreshOdoPanel()">
                     ${cars.map(c => `<option value="${c.id}" ${c.id === target ? 'selected' : ''}>${c.year} ${c.make} ${c.model}</option>`).join('')}
                 </select>
             </div>
-            <div id="odo-panel-wrap">${panel(target)}</div>
+            <div id="odo-panel-wrap">${this._odoPanel(cars.find(c => c.id === target))}</div>
             <div class="form-row">
-                <div class="form-group"><label>Current Odometer (km)</label><input type="number" id="f-odo-km" placeholder="e.g. 62500" inputmode="numeric" oninput="Features._checkOdoInput()"></div>
-                <div class="form-group"><label>${t('Reading Date')}</label><input type="date" id="f-odo-date" max="${new Date().toISOString().split('T')[0]}" value="${new Date().toISOString().split('T')[0]}"></div>
+                <div class="form-group"><label>${t('Current Odometer (km)')}</label><input type="number" id="f-odo-km" placeholder="${t('e.g. 62500')}" inputmode="numeric" oninput="Features._checkOdoInput()"></div>
+                <div class="form-group"><label>${t('Reading Date')}</label><input type="date" id="f-odo-date" max="${Storage.today()}" value="${Storage.today()}"></div>
             </div>
             <div id="odo-warn"></div>`;
 
@@ -429,15 +474,15 @@ const Features = {
             const cid = document.getElementById('f-odo-car').value;
             const km = parseInt(document.getElementById('f-odo-km').value);
             const date = document.getElementById('f-odo-date').value;
-            if (!km || km <= 0) return alert('Please enter a valid odometer reading.');
-            if (!date) return alert('Please choose the reading date.');
+            if (!km || km <= 0) return alert(t('Please enter a valid odometer reading.'));
+            if (!date) return alert(t('Please choose the reading date.'));
 
             const car = Storage.getCars().find(c => c.id === cid);
             const last = Storage.getLastReading(car);
             if (last && km < last.km) {
-                if (!confirm(`That is lower than your last recorded reading (${last.km.toLocaleString()} km).\n\nSave it anyway? Choose Cancel if it was a typo.`)) return;
+                if (!confirm(t('That is lower than your last recorded reading ({km} km).\n\nSave it anyway? Choose Cancel if it was a typo.', { km: last.km.toLocaleString() }))) return;
             }
-            Storage.logOdometer(cid, km, date);
+            if (!Storage.logOdometer(cid, km, date)) return alert(t('A reading cannot be dated in the future.'));
             App.closeModal();
             App.renderPage(App.currentPage);
         });
@@ -455,28 +500,31 @@ const Features = {
         const last = car ? Storage.getLastReading(car) : null;
         const v = parseInt(input.value);
         if (last && v && v < last.km) {
-            warn.innerHTML = `<div class="odo-warning">Lower than your last reading of ${last.km.toLocaleString()} km — double-check the number.</div>`;
+            warn.innerHTML = `<div class="odo-warning">${t('Lower than your last reading of {km} km — double-check the number.', { km: last.km.toLocaleString() })}</div>`;
         } else {
             warn.innerHTML = '';
         }
     },
 
-    _refreshOdoPanel() {
-        const cid = document.getElementById('f-odo-car').value;
-        const cars = Storage.getCars();
-        const car = cars.find(c => c.id === cid);
-        const wrap = document.getElementById('odo-panel-wrap');
-        if (!car || !wrap) return;
+    _odoPanel(car) {
+        if (!car) return '';
         const proj = Storage.getProjectedMileage(car);
         const fresh = Storage.getOdometerFreshness(car);
-        if (!proj.lastKm) { wrap.innerHTML = `<div class="odo-panel"><div class="odo-hint">No reading recorded yet — enter the number on your dashboard now.</div></div>`; return; }
-        const rateTxt = proj.rate ? `${proj.rate.toFixed(0)} km/day average` : 'not enough history to estimate yet';
-        wrap.innerHTML = `<div class="odo-panel">
-            <div class="odo-row"><span>Last confirmed</span><strong>${proj.lastKm.toLocaleString()} km</strong></div>
-            <div class="odo-row"><span>Recorded</span><strong>${proj.lastDate || '—'}${fresh.daysSince !== null ? ` (${fresh.daysSince}d ago)` : ''}</strong></div>
-            ${proj.estimated ? `<div class="odo-row odo-est"><span>Estimated today</span><strong>~ ${proj.km.toLocaleString()} km</strong></div>` : ''}
+        if (!proj.lastKm) return `<div class="odo-panel"><div class="odo-hint">${t('No reading recorded yet — enter the number on your dashboard now.')}</div></div>`;
+        const rateTxt = proj.rate ? t('{r} km/day average', { r: proj.rate.toFixed(0) }) : t('not enough history to estimate yet');
+        return `<div class="odo-panel">
+            <div class="odo-row"><span>${t('Last confirmed')}</span><strong>${proj.lastKm.toLocaleString()} km</strong></div>
+            <div class="odo-row"><span>${t('Recorded')}</span><strong>${proj.lastDate || '—'}${fresh.daysSince !== null ? ` (${t('{d}d ago', { d: fresh.daysSince })})` : ''}</strong></div>
+            ${proj.estimated ? `<div class="odo-row odo-est"><span>${t('Estimated today')}</span><strong>~ ${proj.km.toLocaleString()} km</strong></div>` : ''}
             <div class="odo-hint">${rateTxt}</div>
         </div>`;
+    },
+
+    _refreshOdoPanel() {
+        const cid = document.getElementById('f-odo-car').value;
+        const wrap = document.getElementById('odo-panel-wrap');
+        if (!wrap) return;
+        wrap.innerHTML = this._odoPanel(Storage.getCars().find(c => c.id === cid));
         document.getElementById('odo-warn').innerHTML = '';
     },
 
@@ -562,7 +610,7 @@ const Features = {
         if (!car) return;
         const doc = this.DOCS.find(d => d.key === key);
         const isInspection = key === 'fahesExpiry';
-        const today = new Date().toISOString().split('T')[0];
+        const today = Storage.today();
 
         const last = isInspection
             ? Storage.getServices(carId).filter(s => s.type === 'Periodic Inspection')
@@ -754,7 +802,7 @@ const Features = {
                     carId, type,
                     // A km with no date still needs one to sit on the timeline; use today's
                     // only when the owner gave a reading, never to invent a service event.
-                    date: date || new Date().toISOString().split('T')[0],
+                    date: date || Storage.today(),
                     cost: '', mileage: km, bills: [],
                     notes: 'Recorded from memory, before logging started',
                     backfilled: true
@@ -780,8 +828,6 @@ const Features = {
             return;
         }
         const badge = { frequent: 'blue', onschedule: 'green', stretched: 'orange' };
-        const esc = v => String(v);
-
         const rowHTML = (i) => {
             const parts = [];
             parts.push('<div class="insight-row">');
@@ -805,12 +851,10 @@ const Features = {
             if (i.yearlyDelta && i.yearlyDelta > 50) {
                 const times = i.perYear ? i.perYear.toFixed(1) : '?';
                 const wouldBe = (i.perYear && i.ratio) ? (i.perYear * i.ratio).toFixed(1) : '?';
-                parts.push('<div class="insight-note">About <strong>' + Math.round(i.yearlyDelta) +
-                           ' SAR a year</strong> more than following the schedule — roughly ' + times +
-                           ' times a year instead of ' + wouldBe + '. Reasonable on a high-mileage engine if it is deliberate.</div>');
+                parts.push('<div class="insight-note">' + t('About {sar} SAR a year more than following the schedule — roughly {a} times a year instead of {b}. Reasonable on a high-mileage engine if it is deliberate.',
+                    { sar: Math.round(i.yearlyDelta), a: times, b: wouldBe }) + '</div>');
             } else if (i.verdict === 'stretched' && i.ratio) {
-                parts.push('<div class="insight-note">Running about ' + Math.round((i.ratio - 1) * 100) +
-                           '% past the recommended interval.</div>');
+                parts.push('<div class="insight-note">' + t('Running about {p}% past the recommended interval.', { p: Math.round((i.ratio - 1) * 100) }) + '</div>');
             }
 
             parts.push('</div>');
@@ -870,14 +914,16 @@ const Features = {
             // Documents
             if (c.insuranceExpiry) {
                 const d = Math.ceil((new Date(c.insuranceExpiry) - today) / 86400000);
-                if (d < 0) items.push({ priority: 0, icon: 'shield', title: t('Insurance expired'), sub: `${name} · expired ${c.insuranceExpiry}`, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (d <= 30) items.push({ priority: 1, icon: 'shield', title: t('Insurance expires in {d} days', {d}), sub: name, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                const open = { label: t('Update'), fn: `Features.openDocumentModal('${c.id}','insuranceExpiry')` };
+                if (d < 0) items.push({ priority: 0, icon: 'shield', title: t('Insurance expired'), sub: `${name} · ${c.insuranceExpiry}`, action: open });
+                else if (d <= 30) items.push({ priority: 1, icon: 'shield', title: t('Insurance expires in {d} days', {d}), sub: name, action: open });
             }
             // Fahes (periodic technical inspection)
             const fahesDays = c.fahesExpiry ? Math.ceil((new Date(c.fahesExpiry) - today) / 86400000) : null;
             if (fahesDays !== null) {
-                if (fahesDays < 0) items.push({ priority: 0, icon: 'doc', title: t('Fahes (inspection) expired'), sub: `${name} · expired ${c.fahesExpiry}`, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (fahesDays <= 30) items.push({ priority: 1, icon: 'doc', title: t('Fahes expires in {d} days', {d: fahesDays}), sub: name, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                const open = { label: t('Update'), fn: `Features.openDocumentModal('${c.id}','fahesExpiry')` };
+                if (fahesDays < 0) items.push({ priority: 0, icon: 'doc', title: t('Fahes (inspection) expired'), sub: `${name} · ${c.fahesExpiry}`, action: open });
+                else if (fahesDays <= 30) items.push({ priority: 1, icon: 'doc', title: t('Fahes expires in {d} days', {d: fahesDays}), sub: name, action: open });
             }
             if (c.registrationExpiry) {
                 const d = Math.ceil((new Date(c.registrationExpiry) - today) / 86400000);
@@ -887,8 +933,9 @@ const Features = {
                 if (fahesDays !== null && fahesDays < d) blockers.push('Fahes');
                 if (insDays !== null && insDays < d) blockers.push('insurance');
                 const chain = (d <= 60 && blockers.length) ? ` · ${t('renew {what} first', {what: blockers.map(x => t(x === 'Fahes' ? 'Fahes' : 'Insurance')).join(' + ')})}` : '';
-                if (d < 0) items.push({ priority: 0, icon: 'doc', title: t('Registration (Istimara) expired'), sub: `${name} · expired ${c.registrationExpiry}${chain}`, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
-                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: t('Registration expires in {d} days', {d}), sub: name + chain, action: { label: t('Edit'), fn: `App.openCarModal(Storage.getCars().find(x=>x.id==='${c.id}'))` } });
+                const open = { label: t('Update'), fn: `Features.openDocumentModal('${c.id}','registrationExpiry')` };
+                if (d < 0) items.push({ priority: 0, icon: 'doc', title: t('Registration (Istimara) expired'), sub: `${name} · ${c.registrationExpiry}${chain}`, action: open });
+                else if (d <= 30) items.push({ priority: 1, icon: 'doc', title: t('Registration expires in {d} days', {d}), sub: name + chain, action: open });
             }
             // Measured brake pad wear beats any fixed interval. Front and rear wear at
             // very different rates, so report the latest reading for each separately.
@@ -913,7 +960,7 @@ const Features = {
             }
             // Fuel anomaly
             const anomaly = Storage.getFuelAnomaly(c.id);
-            if (anomaly) items.push({ priority: 1, icon: 'fuel', title: t('Fuel use up {p}%', {p: anomaly.pct}), sub: `${name} · ${anomaly.latest} vs ${anomaly.avg} L/100km avg — check tire pressure & air filter`, action: null });
+            if (anomaly) items.push({ priority: 1, icon: 'fuel', title: t('Fuel use up {p}%', {p: anomaly.pct}), sub: `${name} · ${t('{a} vs {b} L/100km average — check tyre pressure and the air filter', {a: anomaly.latest, b: anomaly.avg})}`, action: null });
             // Tyres — judged on distance covered and on rubber age, whichever runs
             // out first. At high annual mileage distance almost always binds first.
             const tyre = Storage.getTyreStatus(c);
@@ -944,17 +991,18 @@ const Features = {
                 if (w.warranty.status !== 'expiring') return;
                 items.push({
                     priority: 2, icon: 'shield',
-                    title: t('Warranty ending: {part}', {part: w.bill.label || I18N.t(w.bill.kind)}),
-                    sub: `${name} · ${w.warranty.detail}${w.bill.vendor ? ' · ' + w.bill.vendor : ''}`,
+                    title: t('Warranty ending: {part}', {part: esc(w.bill.label) || I18N.t(w.bill.kind)}),
+                    sub: `${name} · ${w.warranty.detail}${w.bill.vendor ? ' · ' + esc(w.bill.vendor) : ''}`,
                     action: { label: t('View'), fn: `App.navigate('warranty')` }
                 });
             });
             // Manual reminders not covered by the schedule
             Storage.getUpcomingReminders(c.id).forEach(r => {
                 if (r.autoCreated || recTypes.includes(r.type)) return;
-                const d = Math.ceil((new Date(r.dueDate) - today) / 86400000);
-                if (d > 30) return;
-                items.push({ priority: d < 0 ? 0 : 1, icon: 'bell', title: `${r.type} ${d < 0 ? 'overdue' : 'due soon'}`, sub: `${name} · ${d < 0 ? Math.abs(d) + ' days overdue' : 'in ' + d + ' days'}`, action: null });
+                const st = Storage.getReminderStatus(r, c);
+                if (st.effDays === null || st.effDays > 30) return;
+                const late = st.status === 'overdue';
+                items.push({ priority: late ? 0 : 1, icon: 'bell', title: t(late ? '{type} overdue' : '{type} due soon', {type: I18N.t(r.type)}), sub: `${name} · ${st.detail}`, action: null });
             });
         });
 
@@ -1067,9 +1115,9 @@ const Features = {
                     `<button type="button" class="snooze-choice" onclick="Features.applySnooze('${carId}','${type}',${c.days})">${t(c.label)}</button>`).join('')}
             </div>
             <div class="form-group"><label>${t('Or pick a date')}</label>
-                <input type="date" id="f-snooze-date" min="${new Date(Date.now() + 86400000).toISOString().split('T')[0]}"></div>
+                <input type="date" id="f-snooze-date" min="${Storage.dateStr(new Date(Date.now() + 86400000))}"></div>
             <div class="form-group"><label>${t('Why? (optional)')}</label>
-                <input type="text" id="f-snooze-note" placeholder="${t('e.g. waiting for payday')}" value="${(existing && existing.note || '').replace(/"/g, '&quot;')}"></div>`;
+                <input type="text" id="f-snooze-note" placeholder="${t('e.g. waiting for payday')}" value="${esc(existing && existing.note)}"></div>`;
         App.openModal(t('Postpone {type}', { type: I18N.t(type) }), html, () => {
             const d = document.getElementById('f-snooze-date').value;
             if (!d) return alert(t('Choose how long, or pick a date.'));
@@ -1098,13 +1146,16 @@ const Features = {
         let forecastHTML = '';
         if (fc.items.length) {
             const grouped = {};
-            fc.items.forEach(i => { grouped[i.type] = (grouped[i.type] || 0) + i.est; });
+            fc.items.forEach(i => {
+                const g = grouped[i.type] = grouped[i.type] || { est: 0, times: 0 };
+                g.est += i.est; g.times += i.times || 1;
+            });
             forecastHTML = `<div class="card" style="flex:1">
                 <h3>${t("6-Month Cost Forecast")}</h3>
                 <div class="forecast-total">~ ${fc.total.toFixed(0)} <span>SAR</span></div>
                 <div class="forecast-sub">${t("Estimated upcoming maintenance over the next 6 months")}</div>
-                <div class="forecast-list">${Object.entries(grouped).sort((a, b) => b[1] - a[1]).map(([type, est]) =>
-                    `<div class="forecast-row"><span>${I18N.t(type)}</span><span class="forecast-est">~ ${est.toFixed(0)} SAR</span></div>`).join('')}</div>
+                <div class="forecast-list">${Object.entries(grouped).sort((a, b) => b[1].est - a[1].est).map(([type, g]) =>
+                    `<div class="forecast-row"><span>${I18N.t(type)}${g.times > 1 ? ` <bdi>×${g.times}</bdi>` : ''}</span><span class="forecast-est">~ ${g.est.toFixed(0)} SAR</span></div>`).join('')}</div>
             </div>`;
         }
 
@@ -1134,8 +1185,8 @@ const Features = {
         const rows = services.map(s => {
             const bills = s.bills || [];
             const detail = bills.length
-                ? bills.map(b => `${b.label || b.kind} — ${b.vendor || 'shop n/a'} — ${(parseFloat(b.amount) || 0).toFixed(0)} SAR`).join('<br>')
-                : (s.notes || '');
+                ? bills.map(b => `${esc(b.label || b.kind)} — ${esc(b.vendor) || 'shop n/a'} — ${(parseFloat(b.amount) || 0).toFixed(0)} SAR`).join('<br>')
+                : esc(s.notes);
             const costNote = s.insurancePaid ? `<br><small>Accident · insurance paid ${Storage.getServiceCost(s).toFixed(0)}</small>`
                 : s.accident ? '<br><small>Accident repair</small>' : '';
             return `<tr><td>${s.date}</td><td>${s.type}</td><td>${s.mileage ? parseInt(s.mileage).toLocaleString() + ' km' : '—'}</td><td>${Storage.getOwnCost(s).toFixed(0)} SAR${costNote}</td><td>${detail}</td></tr>`;
@@ -1153,7 +1204,7 @@ const Features = {
                 @media print{body{padding:20px;}}
             </style></head><body>
             <h1>Vehicle Service History</h1>
-            <div class="sub">${car.year} ${car.make} ${car.model}${car.plate ? ' · ' + car.plate : ''} · Generated ${new Date().toISOString().split('T')[0]}</div>
+            <div class="sub">${car.year} ${car.make} ${car.model}${car.plate ? ' · ' + car.plate : ''} · Generated ${Storage.today()}</div>
             <div class="meta">
                 <div><span>Current Odometer</span><strong>${Storage.getEffectiveMileage(car).toLocaleString()} km</strong></div>
                 <div><span>Total Services</span><strong>${services.length}</strong></div>
@@ -1203,7 +1254,7 @@ const Features = {
         if (fuelTotal > 0) byType['Fuel'] = fuelTotal;
 
         const colors = ['#4f6ef7', '#059669', '#d97706', '#dc2626', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4f46e5', '#65a30d'];
-        const entries = Object.entries(byType).sort((a, b) => b[1] - a[1]);
+        const entries = Object.entries(byType).filter(e => e[1] > 0).sort((a, b) => b[1] - a[1]);
         const total = entries.reduce((s, e) => s + e[1], 0) || 1;
 
         let pieHTML = '';
@@ -1276,10 +1327,10 @@ const Features = {
             <div class="form-group">
                 <label>${t("Driving Climate")}</label>
                 <select id="f-climate">
-                    <option value="normal" ${climate === 'normal' ? 'selected' : ''}>Normal</option>
-                    <option value="severe" ${climate === 'severe' ? 'selected' : ''}>Severe (Hot climate / Saudi Arabia)</option>
+                    <option value="normal" ${climate === 'normal' ? 'selected' : ''}>${t('Normal')}</option>
+                    <option value="severe" ${climate === 'severe' ? 'selected' : ''}>${t('Severe (Hot climate / Saudi Arabia)')}</option>
                 </select>
-                <small style="color:var(--text3);display:block;margin-top:4px">Severe climate reduces recommended intervals by 20% (heat accelerates wear)</small>
+                <small style="color:var(--text3);display:block;margin-top:4px">${t('Severe climate reduces recommended intervals by 20% (heat accelerates wear)')}</small>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>${t("Fuel")}</label>
@@ -1300,7 +1351,7 @@ const Features = {
                     <button class="btn btn-secondary btn-sm" onclick="document.getElementById('import-file').click()">${t("Import Backup")}</button>
                     <input type="file" id="import-file" accept=".json" style="display:none" onchange="Features.importData(this.files[0])">
                 </div>
-                <small class="field-note">Everything is stored in this browser only. Save the file to Files or iCloud Drive so a lost phone doesn't take your records with it.</small>
+                <small class="field-note">${t("Everything is stored in this browser only. Save the file to Files or iCloud Drive so a lost phone doesn't take your records with it.")}</small>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>${t("Recently Deleted")}</label>
@@ -1308,14 +1359,14 @@ const Features = {
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>${t("Receipt Storage")}</label>
-                <div id="storage-usage" class="backup-status">Checking…</div>
+                <div id="storage-usage" class="backup-status">${t('Checking…')}</div>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
                 <label>${t("Notifications")}</label>
-                <button class="btn btn-secondary btn-sm" id="btn-notif" onclick="Features.requestNotifications()">Enable Browser Notifications</button>
+                <button class="btn btn-secondary btn-sm" id="btn-notif" onclick="Features.requestNotifications()">${t('Enable Browser Notifications')}</button>
             </div>
             <div class="form-group" style="border-top:1px solid var(--border);padding-top:14px;margin-top:14px">
-                <label>Mechanics & Shops</label>
+                <label>${t('Mechanics & Shops')}</label>
                 <div id="mechanics-list" style="margin-bottom:8px">${Features.renderMechanicsList()}</div>
                 <button class="btn btn-secondary btn-sm" onclick="Features.addMechanicRow()">${t("+ Add Mechanic")}</button>
             </div>`;
@@ -1325,9 +1376,9 @@ const Features = {
             Photos.usage().then(u => {
                 const mb = u.bytes / 1048576;
                 el.innerHTML = u.count
-                    ? `${u.count} receipt${u.count > 1 ? 's' : ''} using about ${mb.toFixed(1)} MB`
-                    : 'No receipt photos stored yet';
-            }).catch(() => { el.textContent = 'Could not read storage usage'; });
+                    ? t('{n} receipt photo(s), about {mb} MB', { n: u.count, mb: mb.toFixed(1) })
+                    : t('No receipt photos stored yet');
+            }).catch(() => { el.textContent = t('Could not read storage usage'); });
         }, 40);
         setTimeout(() => {
             const m = document.getElementById('f-fuelmode');
@@ -1344,46 +1395,46 @@ const Features = {
                 monthly: val('f-fuelmonthly')
             });
             const langEl = document.getElementById('f-lang');
-            if (langEl && langEl.value !== I18N.lang) { I18N.set(langEl.value); I18N.translateDOM(); }
+            if (langEl && langEl.value !== I18N.lang) { I18N.set(langEl.value); I18N.translateDOM(); App.paintLang(); }
             Features.saveMechanics();
             App.closeModal();
-            App.renderPage(App.currentPage);
+            App.navigate(App.currentPage);
         });
     },
 
     backupStatusLine() {
         const b = Storage.getBackupStatus();
-        if (b.never) return '<span class="backup-warn">Never backed up</span>';
-        const when = new Date(b.lastBackup).toISOString().split('T')[0];
-        const age = b.daysSinceBackup === 0 ? 'today' : `${b.daysSinceBackup} day${b.daysSinceBackup === 1 ? '' : 's'} ago`;
-        if (b.unsavedChanges) return `<span class="backup-warn">Last backup ${when} (${age}) — changed since</span>`;
-        return `<span class="backup-ok">Last backup ${when} (${age}) — up to date</span>`;
+        if (b.never) return `<span class="backup-warn">${t('Never backed up')}</span>`;
+        const when = Storage.dateStr(new Date(b.lastBackup));
+        const age = b.daysSinceBackup === 0 ? t('today') : t('{d}d ago', { d: b.daysSinceBackup });
+        if (b.unsavedChanges) return `<span class="backup-warn">${t('Last backup {d} ({age}) — changed since', { d: when, age })}</span>`;
+        return `<span class="backup-ok">${t('Last backup {d} ({age}) — up to date', { d: when, age })}</span>`;
     },
 
     // ── Recently Deleted ──
     renderTrash() {
         const trash = Storage.getTrash();
-        if (!trash.length) return '<p class="trash-empty">Nothing deleted in the last 30 days.</p>';
-        const describe = t => {
-            const r = t.record || {};
-            if (t.kind === 'car') {
-                const n = t.extras ? (t.extras.services || []).length : 0;
-                return `${r.year || ''} ${r.make || ''} ${r.model || ''}`.trim() + (n ? ` · ${n} service${n > 1 ? 's' : ''}` : '');
+        if (!trash.length) return `<p class="trash-empty">${t('Nothing deleted in the last 30 days.')}</p>`;
+        const describe = e => {
+            const r = e.record || {};
+            if (e.kind === 'car') {
+                const n = e.extras ? (e.extras.services || []).length : 0;
+                return `${r.year || ''} ${r.make || ''} ${r.model || ''}`.trim() + (n ? ' · ' + t('{n} services', { n }) : '');
             }
-            if (t.kind === 'service') return `${r.type || 'Service'} · ${r.date || ''} · ${Storage.getServiceCost(r).toFixed(0)} SAR`;
-            if (t.kind === 'fuel') return `Fuel ${r.liters || '?'} L · ${r.date || ''} · ${parseFloat(r.totalCost || 0).toFixed(0)} SAR`;
-            if (t.kind === 'reminder') return `${r.type || 'Reminder'} · due ${r.dueDate || ''}`;
-            return t.kind;
+            if (e.kind === 'service') return `${I18N.t(r.type || 'Service')} · ${r.date || ''} · ${Storage.getServiceCost(r).toFixed(0)} SAR`;
+            if (e.kind === 'fuel') return `${t('Fuel')} ${r.liters || '?'} L · ${r.date || ''} · ${parseFloat(r.totalCost || 0).toFixed(0)} SAR`;
+            if (e.kind === 'reminder') return `${I18N.t(r.type || 'Reminder')} · ${r.dueDate || ''}`;
+            return e.kind;
         };
-        const label = { car: 'Car', service: 'Service', fuel: 'Fuel log', reminder: 'Reminder' };
-        return trash.map(t => {
-            const daysLeft = Storage.TRASH_DAYS - Math.floor((Date.now() - new Date(t.deletedAt)) / 86400000);
+        const label = { car: 'Car', service: 'Service', fuel: 'Fuel', reminder: 'Reminder' };
+        return trash.map(e => {
+            const daysLeft = Storage.TRASH_DAYS - Math.floor((Date.now() - new Date(e.deletedAt)) / 86400000);
             return `<div class="trash-row">
                 <div class="trash-info">
-                    <div class="trash-title">${label[t.kind] || t.kind}: ${describe(t)}</div>
-                    <div class="trash-sub">Deleted ${new Date(t.deletedAt).toISOString().split('T')[0]} · removed for good in ${daysLeft} day${daysLeft === 1 ? '' : 's'}</div>
+                    <div class="trash-title">${t(label[e.kind] || e.kind)}: ${describe(e)}</div>
+                    <div class="trash-sub">${t('Deleted {d} · removed for good in {n} days', { d: Storage.dateStr(new Date(e.deletedAt)), n: daysLeft })}</div>
                 </div>
-                <button class="btn btn-secondary btn-sm" onclick="Features.restoreTrash('${t.id}')">${I18N.t("Restore")}</button>
+                <button class="btn btn-secondary btn-sm" onclick="Features.restoreTrash('${e.id}')">${t('Restore')}</button>
             </div>`;
         }).join('');
     },
@@ -1397,29 +1448,48 @@ const Features = {
 
     // ── Notifications ──
     requestNotifications() {
-        if (!('Notification' in window)) { alert('Notifications not supported in this browser.'); return; }
+        if (!('Notification' in window)) { alert(t('Notifications not supported in this browser.')); return; }
         Notification.requestPermission().then(p => {
             if (p === 'granted') {
-                alert('Notifications enabled! You will be reminded about upcoming services.');
+                alert(t('Notifications enabled! You will be reminded about upcoming services.'));
                 Features.scheduleNotifications();
             }
         });
     },
 
+    // Runs inside renderDashboard, so it must never throw: Safari outside the installed
+    // app has no Notification at all, and the error stopped the rest of the page drawing.
+    // Once a day, because the dashboard redraws constantly and each draw used to fire again.
     scheduleNotifications() {
-        if (Notification.permission !== 'granted') return;
-        const reminders = Storage.getUpcomingReminders('all');
-        const now = new Date();
-        reminders.forEach(r => {
-            const due = new Date(r.dueDate);
-            const diff = due - now;
-            if (diff > 0 && diff < 7 * 86400000) {
-                const days = Math.ceil(diff / 86400000);
-                setTimeout(() => {
-                    new Notification('AutoCare Reminder', { body: `${r.type} is due in ${days} day(s)!`, icon: '/icon-192.png' });
-                }, Math.min(diff, 5000));
-            }
+        if (typeof Notification === 'undefined' || !Notification || Notification.permission !== 'granted') return;
+        const today = Storage.today();
+        if (localStorage.getItem('autocare_notified') === today) return;
+        const cars = Storage.getCars();
+        const due = Storage.getUpcomingReminders('all').filter(r => {
+            const st = Storage.getReminderStatus(r, cars.find(c => c.id === r.carId)).status;
+            return st === 'overdue' || st === 'soon';
         });
+        if (!due.length) return;
+        localStorage.setItem('autocare_notified', today);
+        this._notify(t('AutoCare Reminder'), [...new Set(due.map(r => I18N.t(r.type)))].join(', '));
+    },
+
+    // iPhones only show notifications through the service worker
+    _notify(title, body) {
+        if (!('serviceWorker' in navigator)) return;
+        navigator.serviceWorker.ready
+            .then(reg => reg.showNotification(title, { body, icon: './icon-192.png', badge: './icon-192.png' }))
+            .catch(() => {});
+    },
+
+    // Automatic notes are written at display time, from the reminder's own figures, so
+    // they read correctly in either language and can't go stale.
+    reminderNote(r) {
+        if (r.autoCreated && !r.autoDoc && !r.retest && Recommendations.ALL_TYPES.includes(r.type)) {
+            const km = parseInt(r.dueMileage) || 0;
+            return km ? t('Automatic: next one at {km} km', { km: km.toLocaleString() }) : t('Automatic: from your last service');
+        }
+        return esc(t(r.notes));
     },
 
     // ── Mechanics ──
@@ -1430,11 +1500,11 @@ const Features = {
 
     renderMechanicsList() {
         const mechs = this.getMechanics();
-        if (!mechs.length) return '<p style="font-size:12px;color:var(--text3)">No saved mechanics yet.</p>';
+        if (!mechs.length) return `<p style="font-size:12px;color:var(--text3)">${t('No saved mechanics yet.')}</p>`;
         return mechs.map((m, i) => `<div class="mechanic-row" style="display:flex;gap:6px;margin-bottom:6px;align-items:center">
-            <input type="text" class="mech-name" value="${m.name}" placeholder="Name" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
-            <input type="text" class="mech-phone" value="${m.phone}" placeholder="Phone" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
-            <input type="text" class="mech-specialty" value="${m.specialty || ''}" placeholder="Specialty" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
+            <input type="text" class="mech-name" value="${esc(m.name)}" placeholder="${t('Name')}" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
+            <input type="text" class="mech-phone" value="${esc(m.phone)}" placeholder="${t('Phone')}" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
+            <input type="text" class="mech-specialty" value="${esc(m.specialty)}" placeholder="${t('Specialty')}" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
             <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">X</button>
         </div>`).join('');
     },
@@ -1444,9 +1514,9 @@ const Features = {
         const row = document.createElement('div');
         row.className = 'mechanic-row';
         row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
-        row.innerHTML = `<input type="text" class="mech-name" placeholder="Name" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
-            <input type="text" class="mech-phone" placeholder="Phone" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
-            <input type="text" class="mech-specialty" placeholder="Specialty" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
+        row.innerHTML = `<input type="text" class="mech-name" placeholder="${t('Name')}" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
+            <input type="text" class="mech-phone" placeholder="${t('Phone')}" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
+            <input type="text" class="mech-specialty" placeholder="${t('Specialty')}" style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12px;background:var(--card);color:var(--text)">
             <button class="btn btn-danger btn-sm" onclick="this.parentElement.remove()">X</button>`;
         list.appendChild(row);
     },
@@ -1587,37 +1657,40 @@ const Features = {
     },
 
     // ── Tire Tracking ──
+    // The rotation pattern is stored as a key and shown on the car card
+    TIRE_PATTERNS: { cross: 'Cross pattern', forward: 'Forward cross', rearward: 'Rearward cross', side: 'Side to side' },
+
     openTireModal(carId) {
         const car = Storage.getCars().find(c => c.id === carId);
         if (!car) return;
         const tires = car.tires || { brand: '', size: '', installedDate: '', installedMileage: '', pattern: 'cross' };
         const html = `
-            <p style="font-size:12px;color:var(--text3);margin-bottom:14px">Tire information for <strong>${car.make} ${car.model}</strong></p>
+            <p style="font-size:12px;color:var(--text3);margin-bottom:14px">${t('Tire information for {car}', { car: `<strong>${car.make} ${car.model}</strong>` })}</p>
             <div class="form-row">
-                <div class="form-group"><label>${t("Tire Brand")}</label><input type="text" id="f-tire-brand" placeholder="e.g. Michelin" value="${tires.brand}"></div>
-                <div class="form-group"><label>${t("Tire Size")}</label><input type="text" id="f-tire-size" placeholder="e.g. 215/55R17" value="${tires.size}"></div>
+                <div class="form-group"><label>${t("Tire Brand")}</label><input type="text" id="f-tire-brand" placeholder="${t('e.g. Michelin')}" value="${esc(tires.brand)}"></div>
+                <div class="form-group"><label>${t("Tire Size")}</label><input type="text" id="f-tire-size" placeholder="${t('e.g. 215/55R17')}" value="${esc(tires.size)}"></div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>Installed Date</label><input type="date" id="f-tire-date" value="${tires.installedDate}"></div>
-                <div class="form-group"><label>Installed at (km)</label><input type="number" id="f-tire-km" placeholder="45000" value="${tires.installedMileage}"></div>
+                <div class="form-group"><label>${t('Installed Date')}</label><input type="date" id="f-tire-date" value="${tires.installedDate}"></div>
+                <div class="form-group"><label>${t('Installed at (km)')}</label><input type="number" id="f-tire-km" placeholder="45000" value="${tires.installedMileage}"></div>
             </div>
             <div class="form-group">
-                <label>Manufacture Date (DOT)</label>
+                <label>${t('Manufacture Date (DOT)')}</label>
                 <input type="month" id="f-tire-made" value="${tires.manufactureDate || ''}">
-                <small class="field-note">From the 4-digit DOT code on the sidewall — e.g. 2419 means week 24 of 2019. Heat hardens rubber, so tyres are usually replaced by 6 years old whatever the tread looks like.</small>
+                <small class="field-note">${t('From the 4-digit DOT code on the sidewall — e.g. 2419 means week 24 of 2019. Heat hardens rubber, so tyres are usually replaced by 6 years old whatever the tread looks like.')}</small>
             </div>
             <div class="form-group">
-                <label>Rotation Pattern</label>
+                <label>${t('Rotation Pattern')}</label>
                 <select id="f-tire-pattern">
-                    <option value="cross" ${tires.pattern === 'cross' ? 'selected' : ''}>Cross pattern (FL&#8596;RR, FR&#8596;RL)</option>
-                    <option value="forward" ${tires.pattern === 'forward' ? 'selected' : ''}>Forward cross (front to rear)</option>
-                    <option value="rearward" ${tires.pattern === 'rearward' ? 'selected' : ''}>Rearward cross (rear to front)</option>
-                    <option value="side" ${tires.pattern === 'side' ? 'selected' : ''}>Side to side (left&#8596;right)</option>
+                    <option value="cross" ${tires.pattern === 'cross' ? 'selected' : ''}>${t('Cross pattern')} (FL&#8596;RR, FR&#8596;RL)</option>
+                    <option value="forward" ${tires.pattern === 'forward' ? 'selected' : ''}>${t('Forward cross')} (${t('front to rear')})</option>
+                    <option value="rearward" ${tires.pattern === 'rearward' ? 'selected' : ''}>${t('Rearward cross')} (${t('rear to front')})</option>
+                    <option value="side" ${tires.pattern === 'side' ? 'selected' : ''}>${t('Side to side')}</option>
                 </select>
             </div>
             <div class="form-group">
-                <label>Warranty (km)</label>
-                <input type="number" id="f-tire-warranty" placeholder="e.g. 80000" value="${tires.warrantyKm || ''}">
+                <label>${t('Warranty (km)')}</label>
+                <input type="number" id="f-tire-warranty" placeholder="${t('e.g. 80000')}" value="${tires.warrantyKm || ''}">
             </div>`;
         App.openModal('Tire Information', html, () => {
             const data = {

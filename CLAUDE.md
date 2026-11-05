@@ -68,6 +68,7 @@ right call to state plainly.
    parsing, every page and every modal in both languages, the overflow sweep at 402px,
    and the raw-`${...}` bug class. It runs the real app in a 402px iframe, and it
    snapshots and restores `localStorage` so a run cannot eat his records.
+   If `sw.js` changed, `node sw.check.js` too; the iframe can't reach the worker.
 2. **Add a check for whatever you just fixed**, so it cannot come back. That is the
    point of the suite; a fix with no check is half done.
 3. **Take a screenshot and look at it.** Green checks cannot tell you a feature is

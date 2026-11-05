@@ -2252,5 +2252,10 @@ tr:hover td { background: var(--card-hover); }
 
 /* What insurance paid, or that a repair sits outside running costs. */
 .cost-sub { display: block; font-size: 11px; font-weight: 500; color: var(--text3); margin-top: 2px; }
+/* The import choice: two big, plainly different actions. */
+.imp-choices { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
+.imp-choices .btn { width: 100%; justify-content: center; min-height: 46px; }
+.imp-choices .field-note { margin-bottom: 10px; }
+
 .cost-cell { display: inline-block; }
 .svc-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }

@@ -1,4 +1,4 @@
-const CACHE = 'autocare-v42';
+const CACHE = 'autocare-v43';
 const ASSETS = ['./', './index.html', './styles.css', './i18n.js', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => {
@@ -21,21 +21,38 @@ self.addEventListener('activate', e => {
 // with CORS.
 const FONT_HOSTS = ['fonts.googleapis.com', 'fonts.gstatic.com'];
 
-// Network-first: deploys show up immediately when online; cache keeps the app working offline.
+// How long a weak signal gets before the app opens from its own copy. Plain
+// network-first waited for the request to fail, and on a highway with one bar of
+// signal that can take the better part of a minute of blank screen.
+const NETWORK_TIMEOUT_MS = 2500;
+
+// Network-first: deploys show up immediately when online; cache keeps the app working
+// offline and on a connection too slow to wait for.
 self.addEventListener('fetch', e => {
     if (e.request.method !== 'GET') return;
-    e.respondWith(
-        fetch(e.request)
-            .then(res => {
-                const u = new URL(e.request.url);
-                if (res.ok && (u.origin === location.origin || FONT_HOSTS.includes(u.hostname))) {
-                    const copy = res.clone();
-                    caches.open(CACHE).then(c => c.put(e.request, copy));
-                }
-                return res;
-            })
-            .catch(() => caches.match(e.request).then(r => r || caches.match('./index.html')))
-    );
+    const network = fetch(e.request).then(res => {
+        const u = new URL(e.request.url);
+        if (res.ok && (u.origin === location.origin || FONT_HOSTS.includes(u.hostname))) {
+            const copy = res.clone();
+            caches.open(CACHE).then(c => c.put(e.request, copy));
+        }
+        return res;
+    });
+    // Let a slow response finish and refresh the cache even after the timeout won
+    e.waitUntil(network.catch(() => {}));
+    e.respondWith(new Promise(resolve => {
+        const timer = setTimeout(() => {
+            caches.match(e.request).then(r => { if (r) resolve(r); });  // nothing cached: keep waiting
+        }, NETWORK_TIMEOUT_MS);
+        network
+            .then(res => { clearTimeout(timer); resolve(res); })
+            .catch(() => {
+                clearTimeout(timer);
+                caches.match(e.request)
+                    .then(r => r || caches.match('./index.html'))
+                    .then(r => resolve(r || Response.error()));
+            });
+    }));
 });
 
 // Push notifications

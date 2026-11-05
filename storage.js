@@ -5,8 +5,7 @@ const Storage = {
         return { cars: [], services: [], reminders: [], fuelLogs: [], odometerLogs: [], trash: [], snoozes: [] };
     },
 
-    getAll() {
-        const raw = localStorage.getItem(this._key);
+    _withDefaults(raw) {
         if (!raw) return this._defaults();
         const data = JSON.parse(raw);
         if (!data.fuelLogs) data.fuelLogs = [];
@@ -15,6 +14,37 @@ const Storage = {
         if (!data.snoozes) data.snoozes = [];
         return data;
     },
+
+    // A private copy, for anything that is going to change it and save.
+    getAll() {
+        return this._withDefaults(localStorage.getItem(this._key));
+    },
+
+    // The read path. One dashboard asks for the records several hundred times, and
+    // parsing the whole database each time was most of what drawing a page cost.
+    // Compared against the stored text rather than cleared on save, so a write from
+    // anywhere else is still seen. Callers get their own arrays but share the rows,
+    // so nothing may write to a row that came from here; writers use getAll().
+    _readRaw: null,
+    _readData: null,
+    _read() {
+        const raw = localStorage.getItem(this._key);
+        if (raw !== this._readRaw || !this._readData) {
+            this._readRaw = raw;
+            this._readData = this._withDefaults(raw);
+        }
+        return this._readData;
+    },
+
+    // Today on the owner's calendar. toISOString() is UTC, which in Saudi Arabia is
+    // still yesterday until 3 AM: forms offered the wrong date and a reading dated
+    // today was refused as being in the future.
+    dateStr(d) {
+        const x = d || new Date();
+        const p = n => String(n).padStart(2, '0');
+        return x.getFullYear() + '-' + p(x.getMonth() + 1) + '-' + p(x.getDate());
+    },
+    today() { return this.dateStr(); },
 
     save(data) {
         localStorage.setItem(this._key, JSON.stringify(data));
@@ -114,7 +144,7 @@ const Storage = {
     },
 
     // --- Cars ---
-    getCars() { return this.getAll().cars; },
+    getCars() { return this._read().cars.slice(); },
 
     addCar(car) {
         const data = this.getAll();
@@ -155,15 +185,15 @@ const Storage = {
 
     // --- Services ---
     getServices(carId) {
-        const services = this.getAll().services;
+        const services = this._read().services;
         if (carId && carId !== 'all') return services.filter(s => s.carId === carId);
-        return services;
+        return services.slice();
     },
 
     addService(service) {
         // A service dated in the future resets its own schedule from a date that
         // has not happened, pushing the next one out by a full interval.
-        const today = new Date().toISOString().split('T')[0];
+        const today = this.today();
         if (service && service.date && service.date > today) service.date = today;
         const data = this.getAll();
         service.id = Date.now().toString() + Math.random().toString(36).substr(2, 4);
@@ -185,9 +215,9 @@ const Storage = {
 
     // --- Reminders ---
     getReminders(carId) {
-        const reminders = this.getAll().reminders;
+        const reminders = this._read().reminders;
         if (carId && carId !== 'all') return reminders.filter(r => r.carId === carId);
-        return reminders;
+        return reminders.slice();
     },
 
     addReminder(reminder) {
@@ -206,11 +236,19 @@ const Storage = {
 
     deleteReminder(id) { this._toTrash('reminder', 'reminders', id); },
 
+    // The app replacing its own reminder is not the owner deleting something, so it
+    // stays out of Recently Deleted, where a dozen of them were burying real entries.
+    dropReminder(id) {
+        const data = this.getAll();
+        data.reminders = data.reminders.filter(r => r.id !== id);
+        this.save(data);
+    },
+
     // --- Fuel Logs ---
     getFuelLogs(carId) {
-        const logs = this.getAll().fuelLogs;
+        const logs = this._read().fuelLogs;
         if (carId && carId !== 'all') return logs.filter(f => f.carId === carId);
-        return logs;
+        return logs.slice();
     },
 
     addFuelLog(log) {
@@ -230,7 +268,7 @@ const Storage = {
         const idx = data.cars.findIndex(c => c.id === carId);
         if (idx !== -1 && km > (parseInt(data.cars[idx].mileage) || 0)) {
             data.cars[idx].mileage = km.toString();
-            data.cars[idx].mileageDate = date || new Date().toISOString().split('T')[0];
+            data.cars[idx].mileageDate = date || this.today();
             this.save(data);
         }
     },
@@ -241,8 +279,8 @@ const Storage = {
         if (!reading || !carId) return null;
         // A reading dated in the future would become the car's current mileage and
         // drag every projection with it. Nobody can read tomorrow's odometer.
-        const when = date || new Date().toISOString().split('T')[0];
-        if (when > new Date().toISOString().split('T')[0]) return null;
+        const when = date || this.today();
+        if (when > this.today()) return null;
         const data = this.getAll();
         const entry = {
             id: Date.now().toString() + Math.random().toString(36).substr(2, 4),
@@ -257,9 +295,9 @@ const Storage = {
     },
 
     getOdometerLogs(carId) {
-        const logs = this.getAll().odometerLogs;
+        const logs = this._read().odometerLogs;
         if (carId && carId !== 'all') return logs.filter(o => o.carId === carId);
-        return logs;
+        return logs.slice();
     },
 
     deleteOdometerLog(id) {
@@ -457,6 +495,7 @@ const Storage = {
         if (!months && !km) return null;
 
         const today = new Date();
+        const T = (str, vars) => (typeof I18N !== 'undefined' ? I18N.t(str, vars) : str);
         let daysRemaining = null, expiryDate = null;
         if (months && bill.date) {
             const exp = new Date(bill.date);
@@ -483,7 +522,7 @@ const Storage = {
         if (daysRemaining === null && kmRemaining === null) {
             return {
                 status: 'unknown',
-                detail: 'Add the odometer reading for this service to track it',
+                detail: T('Add the odometer reading for this service to track it'),
                 daysRemaining: null, kmRemaining: null, expiryDate: null, endKm: null, months, km
             };
         }
@@ -493,13 +532,13 @@ const Storage = {
         const dRatio = daysRemaining !== null && months ? daysRemaining / (months * 30.44) : Infinity;
         const kRatio = kmRemaining !== null && km ? kmRemaining / km : Infinity;
         if (expired) {
-            detail = 'Expired';
+            detail = T('Expired');
         } else if (kmRemaining !== null && kRatio < dRatio) {
-            detail = `${kmRemaining.toLocaleString()} km left`;
+            detail = T('{km} km left', { km: kmRemaining.toLocaleString() });
         } else if (daysRemaining !== null) {
-            detail = daysRemaining <= 60 ? `${daysRemaining} days left` : `${Math.round(daysRemaining / 30)} months left`;
+            detail = daysRemaining <= 60 ? T('{n} days left', { n: daysRemaining }) : T('{n} months left', { n: Math.round(daysRemaining / 30) });
         } else {
-            detail = `${kmRemaining.toLocaleString()} km left`;
+            detail = T('{km} km left', { km: kmRemaining.toLocaleString() });
         }
 
         return {
@@ -554,10 +593,30 @@ const Storage = {
         return this.getFuelLogs(carId).reduce((sum, f) => sum + (parseFloat(f.totalCost) || 0), 0);
     },
 
+    // Soonest first, by whichever limit runs out first. Sorting on the date alone
+    // put a job 300 km away behind one three weeks off.
     getUpcomingReminders(carId) {
+        const cars = this.getCars();
         return this.getReminders(carId)
             .filter(r => !r.completed)
-            .sort((a, b) => new Date(a.dueDate) - new Date(b.dueDate));
+            .map(r => ({ r, d: this.getReminderStatus(r, cars.find(c => c.id === r.carId)).effDays }))
+            .sort((a, b) => (a.d === null ? Infinity : a.d) - (b.d === null ? Infinity : b.d))
+            .map(x => x.r);
+    },
+
+    // Overdue reminders that are not a scheduled job. Those are scored from the
+    // schedule, and their reminder is a view of the same job, not a second one.
+    _overdueExtras(car) {
+        return this.getUpcomingReminders(car.id).filter(r =>
+            !Recommendations.ALL_TYPES.includes(r.type) && this.getReminderStatus(r, car).status === 'overdue');
+    },
+
+    getOverdueCount(car) {
+        const scheduled = Recommendations.ALL_TYPES.filter(type => {
+            const st = Recommendations.getMaintenanceStatus(car, type);
+            return st && st.status === 'overdue';
+        }).length;
+        return scheduled + this._overdueExtras(car).length;
     },
 
     getFuelConsumption(carId) {
@@ -617,8 +676,10 @@ const Storage = {
     // Projected spend over the next `months`: combines scheduled maintenance that is
     // overdue/due within the horizon (whichever-first engine) plus any manual reminders.
     getCostForecast(carId, months = 6) {
-        const horizon = new Date();
+        const now = new Date();
+        const horizon = new Date(now);
         horizon.setMonth(horizon.getMonth() + months);
+        const horizonDays = (horizon - now) / 86400000;
         const cars = this.getCars().filter(c => carId === 'all' || c.id === carId);
         const recTypes = Recommendations.ALL_TYPES;
         const seen = new Set();
@@ -628,11 +689,16 @@ const Storage = {
             recTypes.forEach(type => {
                 const st = Recommendations.getMaintenanceStatus(c, type);
                 if (!st || st.status === 'unknown') return;   // no record, so no date to forecast from
-                // include if overdue, or its next-due date falls within the horizon
-                if (st.status === 'overdue' || new Date(st.nextDate) <= horizon) {
-                    seen.add(c.id + '|' + type);
-                    items.push({ type, carId: c.id, dueDate: st.nextDate, est: this.estimateServiceCost(type, c.id) });
-                }
+                // Whichever comes first, as everywhere else. Reading the time limit
+                // alone left out everything due by distance on a car doing 125 km a day.
+                const firstIn = Math.max(0, st.dueDays);
+                if (firstIn > horizonDays) return;
+                // A short interval comes round more than once in six months
+                const kmDays = st.rate > 0 ? st.rec.km / st.rate : Infinity;
+                const every = Math.min(kmDays, (st.rec.months || 12) * 30.44);
+                const times = 1 + Math.floor((horizonDays - firstIn) / every);
+                seen.add(c.id + '|' + type);
+                items.push({ type, carId: c.id, dueDate: st.dueDate, times, est: this.estimateServiceCost(type, c.id) * times });
             });
             // manual reminders not already covered by the schedule
             this.getUpcomingReminders(c.id).forEach(r => {
@@ -706,9 +772,10 @@ const Storage = {
     // This-month vs last-month delta (for trend arrows)
     getSpendTrend(carId) {
         const now = new Date();
-        const thisYM = now.toISOString().substring(0, 7);
-        const lastDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-        const lastYM = lastDate.toISOString().substring(0, 7);
+        const thisYM = this.dateStr(now).substring(0, 7);
+        // The 1st at local midnight is still the month before in UTC, so "last month"
+        // quietly read the one before it.
+        const lastYM = this.dateStr(new Date(now.getFullYear(), now.getMonth() - 1, 1)).substring(0, 7);
         const cur = this.getMonthlySpend(carId, thisYM);
         const prev = this.getMonthlySpend(carId, lastYM);
         let pct = null;
@@ -734,7 +801,8 @@ const Storage = {
             if (rate && rate > 0) kmDays = Math.round(kmRemaining / rate);
         }
 
-        const overdue = (daysRemaining !== null && daysRemaining <= 0) ||
+        // Due today is not overdue yet
+        const overdue = (daysRemaining !== null && daysRemaining < 0) ||
                         (kmRemaining !== null && kmRemaining <= 0);
         const horizons = [daysRemaining, kmDays].filter(v => v !== null);
         const effDays = horizons.length ? Math.min(...horizons) : null;
@@ -770,7 +838,7 @@ const Storage = {
         const base = r.dueDate ? new Date(r.dueDate) : new Date();
         const from = base > new Date() ? base : new Date();
         from.setDate(from.getDate() + days);
-        r.dueDate = from.toISOString().split('T')[0];
+        r.dueDate = this.dateStr(from);
         const rate = this.getDailyKmRate(r.carId);
         if (r.dueMileage && rate) {
             const car = data.cars.find(c => c.id === r.carId);
@@ -895,7 +963,7 @@ const Storage = {
         const data = this.getAll();
         const until = new Date();
         until.setDate(until.getDate() + Math.max(1, parseInt(days) || 7));
-        const untilStr = until.toISOString().split('T')[0];
+        const untilStr = this.dateStr(until);
         const existing = data.snoozes.find(s => s.carId === carId && s.type === type);
         if (existing) {
             existing.until = untilStr;
@@ -905,7 +973,7 @@ const Storage = {
             data.snoozes.push({
                 id: 'sn_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
                 carId, type, until: untilStr, times: 1,
-                createdAt: new Date().toISOString().split('T')[0],
+                createdAt: this.today(),
                 note: note || ''
             });
         }
@@ -915,14 +983,14 @@ const Storage = {
 
     // Expired postponements are dropped on read, so an item returns on its own.
     getSnooze(carId, type) {
-        const today = new Date().toISOString().split('T')[0];
-        return this.getAll().snoozes.find(s =>
+        const today = this.today();
+        return this._read().snoozes.find(s =>
             s.carId === carId && s.type === type && s.until > today) || null;
     },
 
     getActiveSnoozes(carId) {
-        const today = new Date().toISOString().split('T')[0];
-        return this.getAll().snoozes
+        const today = this.today();
+        return this._read().snoozes
             .filter(s => s.until > today && (!carId || carId === 'all' || s.carId === carId))
             .sort((a, b) => a.until.localeCompare(b.until));
     },
@@ -1098,7 +1166,6 @@ const Storage = {
 
     getCarHealthScore(car) {
         const recs = Recommendations.getAllForCar(car);
-        const reminders = this.getUpcomingReminders(car.id);
         let totalItems = 0, healthyItems = 0, unknownItems = 0;
 
         // Each scheduled service evaluated on whichever-comes-first (km OR time).
@@ -1131,8 +1198,7 @@ const Storage = {
         }
 
         // Overdue reminders penalty
-        const overdueCount = reminders.filter(r => new Date(r.dueDate) < new Date()).length;
-        healthyItems = Math.max(0, healthyItems - overdueCount * 0.5);
+        healthyItems = Math.max(0, healthyItems - this._overdueExtras(car).length * 0.5);
 
         if (totalItems === 0) return { score: null, label: 'Not enough records', color: 'blue', totalItems, unknownItems };
         const score = Math.round((healthyItems / totalItems) * 100);

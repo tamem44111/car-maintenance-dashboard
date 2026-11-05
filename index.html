@@ -137,7 +137,11 @@
         navigator.serviceWorker.addEventListener('controllerchange', function () {
             if (!hadController || reloaded) return;
             reloaded = true;
-            location.reload();
+            // A new version can take over moments after opening. Reloading then threw
+            // away whatever was being typed, so wait for the form to close.
+            var modal = document.getElementById('modal');
+            if (modal && modal.style.display !== 'none') window.__reloadAfterModal = true;
+            else location.reload();
         });
         navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' })
             .then(function (reg) { reg.update(); })

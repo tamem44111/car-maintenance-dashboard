@@ -25,20 +25,21 @@ const App = {
     },
 
     // ── Language ──
-    bindLanguage() {
-        const paint = () => document.querySelectorAll('.lang-btn').forEach(b =>
+    paintLang() {
+        document.querySelectorAll('.lang-btn').forEach(b =>
             b.classList.toggle('active', b.dataset.lang === I18N.lang));
+    },
+    bindLanguage() {
         document.querySelectorAll('.lang-btn').forEach(btn => {
             btn.addEventListener('click', () => {
                 if (btn.dataset.lang === I18N.lang) return;
                 I18N.set(btn.dataset.lang);
                 I18N.translateDOM();
-                paint();
-                this.renderPage(this.currentPage);
+                this.paintLang();
                 this.navigate(this.currentPage);
             });
         });
-        paint();
+        this.paintLang();
     },
 
     // ── Navigation ──
@@ -70,6 +71,7 @@ const App = {
     },
 
     renderPage(page) {
+        Recommendations.syncAutoReminders();
         switch(page) {
             case 'dashboard': this.renderDashboard(); break;
             case 'cars': this.renderCars(); break;
@@ -102,11 +104,18 @@ const App = {
     openModal(title, bodyHTML, onSave) {
         document.getElementById('modal-save').style.display = '';
         document.getElementById('modal-title').textContent = t(title);
-        document.getElementById('modal-body').innerHTML = bodyHTML;
+        const body = document.getElementById('modal-body');
+        body.innerHTML = bodyHTML;
+        body.scrollTop = 0;
         document.getElementById('modal').style.display = 'flex';
         document.getElementById('modal-save').onclick = onSave;
     },
-    closeModal() { document.getElementById('modal').style.display = 'none'; },
+    closeModal() {
+        document.getElementById('modal').style.display = 'none';
+        if (typeof Features !== 'undefined') Features._pendingImport = null;
+        // A new version arrived while a form was open (see index.html)
+        if (window.__reloadAfterModal) location.reload();
+    },
 
     openAddModal(page) {
         switch(page) {
@@ -121,36 +130,36 @@ const App = {
     // ── Car Modal ──
     openCarModal(car = null) {
         const html = `
-            <div class="form-group"><label>Make</label><input type="text" id="f-make" placeholder="e.g. Toyota" value="${car?car.make:''}"></div>
+            <div class="form-group"><label>${t('Make')}</label><input type="text" id="f-make" placeholder="${t('e.g. Toyota')}" value="${car?esc(car.make):''}"></div>
             <div class="form-row">
-                <div class="form-group"><label>Model</label><input type="text" id="f-model" placeholder="e.g. Camry" value="${car?car.model:''}"></div>
-                <div class="form-group"><label>Year</label><input type="number" id="f-year" placeholder="2022" value="${car?car.year:''}"></div>
+                <div class="form-group"><label>${t('Model')}</label><input type="text" id="f-model" placeholder="${t('e.g. Camry')}" value="${car?esc(car.model):''}"></div>
+                <div class="form-group"><label>${t('Year')}</label><input type="number" id="f-year" placeholder="2022" value="${car?car.year:''}"></div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>Current Mileage (km)</label><input type="number" id="f-mileage" placeholder="50000" value="${car?car.mileage:''}"></div>
-                <div class="form-group"><label>License Plate</label><input type="text" id="f-plate" placeholder="ABC 1234" value="${car?car.plate:''}"></div>
+                <div class="form-group"><label>${t('Current Mileage (km)')}</label><input type="number" id="f-mileage" placeholder="50000" value="${car?car.mileage:''}"></div>
+                <div class="form-group"><label>${t('License Plate')}</label><input type="text" id="f-plate" placeholder="${t('ABC 1234')}" value="${car?esc(car.plate):''}"></div>
             </div>
-            <div class="form-group"><label>Color</label><input type="text" id="f-color" placeholder="Silver" value="${car?car.color:''}"></div>
+            <div class="form-group"><label>${t('Color')}</label><input type="text" id="f-color" placeholder="${t('Silver')}" value="${car?esc(car.color):''}"></div>
             <div class="form-row">
-                <div class="form-group"><label>Insurance Expiry</label><input type="date" id="f-insurance" value="${car?car.insuranceExpiry||'':''}"></div>
-                <div class="form-group"><label>Registration (Istimara) Expiry</label><input type="date" id="f-registration" value="${car?car.registrationExpiry||'':''}"></div>
-            </div>
-            <div class="form-row">
-                <div class="form-group"><label>Fahes (Inspection) Expiry</label><input type="date" id="f-fahes" value="${car?car.fahesExpiry||'':''}"><small class="field-note">Istimara renewal needs a valid Fahes and insurance.</small></div>
-                <div class="form-group"><label>Manufacturer Warranty Until</label><input type="date" id="f-warranty" value="${car?car.warrantyExpiry||'':''}"></div>
+                <div class="form-group"><label>${t('Insurance Expiry')}</label><input type="date" id="f-insurance" value="${car?car.insuranceExpiry||'':''}"></div>
+                <div class="form-group"><label>${t('Registration (Istimara) Expiry')}</label><input type="date" id="f-registration" value="${car?car.registrationExpiry||'':''}"></div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>Timing Belt or Chain</label>
+                <div class="form-group"><label>${t('Fahes (Inspection) Expiry')}</label><input type="date" id="f-fahes" value="${car?car.fahesExpiry||'':''}"><small class="field-note">${t('Istimara renewal needs a valid Fahes and insurance.')}</small></div>
+                <div class="form-group"><label>${t('Manufacturer Warranty Until')}</label><input type="date" id="f-warranty" value="${car?car.warrantyExpiry||'':''}"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>${t('Timing Belt or Chain')}</label>
                     <select id="f-timing">
-                        <option value="" ${!car||!car.timingType?'selected':''}>Not sure / skip</option>
-                        <option value="belt" ${car&&car.timingType==='belt'?'selected':''}>Belt — needs replacing</option>
-                        <option value="chain" ${car&&car.timingType==='chain'?'selected':''}>Chain — normally lifetime</option>
+                        <option value="" ${!car||!car.timingType?'selected':''}>${t('Not sure / skip')}</option>
+                        <option value="belt" ${car&&car.timingType==='belt'?'selected':''}>${t('Belt — needs replacing')}</option>
+                        <option value="chain" ${car&&car.timingType==='chain'?'selected':''}>${t('Chain — normally lifetime')}</option>
                     </select>
-                    <small class="field-note">A snapped belt can destroy the engine. Only belts are scheduled.</small>
+                    <small class="field-note">${t('A snapped belt can destroy the engine. Only belts are scheduled.')}</small>
                 </div>
-                <div class="form-group"><label>Market Value (SAR)</label><input type="number" id="f-value" placeholder="e.g. 25000" value="${car?car.marketValue||'':''}"><small class="field-note">Roughly what it would sell for — powers the keep-or-sell view.</small></div>
+                <div class="form-group"><label>${t('Market Value (SAR)')}</label><input type="number" id="f-value" placeholder="${t('e.g. 25000')}" value="${car?car.marketValue||'':''}"><small class="field-note">${t('Roughly what it would sell for — powers the keep-or-sell view.')}</small></div>
             </div>
-            <div class="form-group"><label>Recall / Safety Notes</label><textarea id="f-recall" rows="2" placeholder="e.g. Open recall: airbag inflator — book at dealer">${car?car.recallNotes||'':''}</textarea></div>`;
+            <div class="form-group"><label>${t('Recall / Safety Notes')}</label><textarea id="f-recall" rows="2" placeholder="${t('e.g. Open recall: airbag inflator — book at dealer')}">${car?esc(car.recallNotes):''}</textarea></div>`;
         this.openModal(car?'Edit Car':'Add Car', html, () => {
             const data = {
                 make: document.getElementById('f-make').value.trim(),
@@ -167,9 +176,19 @@ const App = {
                 marketValue: document.getElementById('f-value').value.trim(),
                 recallNotes: document.getElementById('f-recall').value.trim(),
             };
-            if (!data.make || !data.model || !data.year) return alert('Please fill in make, model, and year.');
+            if (!data.make || !data.model || !data.year) return alert(t('Please fill in make, model, and year.'));
+            const kmBefore = car ? parseInt(car.mileage) || 0 : 0;
             const saved = car ? Storage.updateCar(car.id, data) : Storage.addCar(data);
-            if (saved && saved.id) Storage.syncDocumentReminders(saved.id);
+            if (saved && saved.id) {
+                Storage.syncDocumentReminders(saved.id);
+                // A km typed here is a reading taken today. Left on its old date it was
+                // projected forward from then, so 439,000 showed as 441,007.
+                const km = parseInt(data.mileage) || 0;
+                if (km && km !== kmBefore) {
+                    Storage.updateCar(saved.id, { mileageDate: Storage.today() });
+                    if (km > kmBefore) Storage.logOdometer(saved.id, km, Storage.today());
+                }
+            }
             this.closeModal(); this.renderPage(this.currentPage);
         });
     },
@@ -188,12 +207,12 @@ const App = {
         if (!recent.length) return this.openServiceModal(null, cid);
         const car = cars.find(c => c.id === cid);
         const km = Storage.getEffectiveMileage(car);
-        const html = `<p class="odo-intro">Pick a job you've done before. It opens pre-filled with today's date and ${km ? km.toLocaleString() + ' km' : 'the current reading'} — change anything before saving.</p>
+        const html = `<p class="odo-intro">${t("Pick a job you've done before. It opens pre-filled with today's date and {km} — change anything before saving.", { km: km ? km.toLocaleString() + ' ' + t('km') : t('the current reading') })}</p>
             <div class="repeat-list">${recent.map(s => {
                 const since = km && s.mileage ? km - parseInt(s.mileage) : null;
                 return `<button type="button" class="repeat-row" onclick="App.repeatService('${s.id}')">
                     <span class="repeat-type">${I18N.t(s.type)}</span>
-                    <span class="repeat-meta">last ${s.date}${since && since > 0 ? ' · ' + since.toLocaleString() + ' km ago' : ''}${Storage.getRunningCost(s) ? ' · ' + Storage.getRunningCost(s).toFixed(0) + ' SAR' : ''}</span>
+                    <span class="repeat-meta">${t('last {d}', { d: s.date })}${since && since > 0 ? ' · ' + t('{km} km ago', { km: since.toLocaleString() }) : ''}${Storage.getRunningCost(s) ? ' · ' + Storage.getRunningCost(s).toFixed(0) + ' SAR' : ''}</span>
                 </button>`;
             }).join('')}</div>`;
         this.openModal('Repeat a Service', html, () => this.closeModal());
@@ -221,27 +240,32 @@ const App = {
         const types = Recommendations.logTypes();
         const isEdit = !!service;
         const isOil = service && service.type === 'Oil Change';
+        // The oil picker sets the car's interval, so it starts on the interval the car
+        // is using — and an old record, which no longer speaks for the car, doesn't show it.
+        const oldOil = isOil && !Recommendations.isNewest(service.carId, 'Oil Change', service.date, service.id);
         const chips = isEdit ? '' : this._serviceChips(cars.find(c => c.id === (presetCarId || (this.selectedCarId !== 'all' ? this.selectedCarId : (cars[0] && cars[0].id)))), presetType);
         // Fall back to the car currently filtered, else the first one, so the odometer
         // can always be pre-filled instead of being typed by hand.
         const selCar = service ? service.carId
             : (presetCarId || (this.selectedCarId !== 'all' ? this.selectedCarId : (cars[0] && cars[0].id)) || '');
+        const oilCustom = (Recommendations.getCustom()[selCar] || {})['Oil Change'];
+        const oilChoice = String((service && service.oilInterval) || (oilCustom && oilCustom.km) || '5000');
         const html = `
             <div class="form-group"><label>${t('Car')}</label><select id="f-car" onchange="App._syncServiceMileage()">${cars.map(c=>`<option value="${c.id}" ${selCar===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-group"><label>${t(isEdit?'Service Type':'Services Performed (select all that apply)')}</label>
                 ${isEdit?`<select id="f-type" onchange="App._toggleServiceExtras()">${types.map(t=>`<option value="${t}" ${service.type===t?'selected':''}>${I18N.t(t)}</option>`).join('')}</select>`:`<div class="svc-picker">${chips}</div>`}
             </div>
-            <div id="oil-options" style="display:${isOil||presetType==='Oil Change'?'block':'none'}">
+            <div id="oil-options" ${oldOil?'data-locked="1"':''} style="display:${(isOil&&!oldOil)||presetType==='Oil Change'?'block':'none'}">
                 <div class="form-group"><label>${t('Oil Type (next change interval)')}</label>
                     <div class="oil-interval-group">
-                        <label class="oil-option"><input type="radio" name="oil-interval" value="5000" ${!service||!service.oilInterval||service.oilInterval==='5000'?'checked':''}><span class="oil-option-card"><strong>5,000 km</strong><small>${t('Regular')}</small></span></label>
-                        <label class="oil-option"><input type="radio" name="oil-interval" value="7000" ${service&&service.oilInterval==='7000'?'checked':''}><span class="oil-option-card"><strong>7,000 km</strong><small>${t('Semi-synthetic')}</small></span></label>
-                        <label class="oil-option"><input type="radio" name="oil-interval" value="10000" ${service&&service.oilInterval==='10000'?'checked':''}><span class="oil-option-card"><strong>10,000 km</strong><small>${t('Full synthetic')}</small></span></label>
+                        <label class="oil-option"><input type="radio" name="oil-interval" value="5000" ${oilChoice==='5000'?'checked':''}><span class="oil-option-card"><strong>5,000 km</strong><small>${t('Regular')}</small></span></label>
+                        <label class="oil-option"><input type="radio" name="oil-interval" value="7000" ${oilChoice==='7000'?'checked':''}><span class="oil-option-card"><strong>7,000 km</strong><small>${t('Semi-synthetic')}</small></span></label>
+                        <label class="oil-option"><input type="radio" name="oil-interval" value="10000" ${oilChoice==='10000'?'checked':''}><span class="oil-option-card"><strong>10,000 km</strong><small>${t('Full synthetic')}</small></span></label>
                     </div>
                 </div>
             </div>
             <div class="form-row">
-                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" max="${new Date().toISOString().split('T')[0]}" value="${service?service.date:new Date().toISOString().split('T')[0]}" onchange="App._toggleServiceExtras()"></div>
+                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" max="${Storage.today()}" value="${service?service.date:Storage.today()}" onchange="App._toggleServiceExtras()"></div>
                 <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-cost" placeholder="0.00" step="0.01" value="${service?service.cost:''}"><small id="cost-note" class="field-note"></small></div>
             </div>
             <label class="check-only"><input type="checkbox" id="f-checkonly" ${service&&service.checkOnly?'checked':''} onchange="App._paintCheckOnly()"> ${t('Checked only \u2014 nothing was replaced')}</label>
@@ -270,7 +294,7 @@ const App = {
             </div>
             <div class="form-group"><label>${t('Mileage at Service (km)')}</label><input type="number" id="f-smileage" placeholder="50000" oninput="App._checkServiceMileage()" value="${service?service.mileage:(selCar?Storage.getEffectiveMileage(cars.find(c=>c.id===selCar)||{})||'':'')}"><small id="smileage-note" class="field-note"></small><div id="smileage-warn"></div></div>
             ${Features.renderBillsEditor(service?service.bills:[])}
-            <div class="form-group"><label>${t('Notes')}</label><textarea id="f-notes" rows="2" placeholder="${t('Optional...')}">${service?service.notes||'':''}</textarea></div>`;
+            <div class="form-group"><label>${t('Notes')}</label><textarea id="f-notes" rows="2" placeholder="${t('Optional...')}">${service?esc(service.notes):''}</textarea></div>`;
         this.openModal(isEdit?'Edit Service':'Add Service', html, () => {
             const carId=document.getElementById('f-car').value, date=document.getElementById('f-date').value, cost=document.getElementById('f-cost').value, mileage=document.getElementById('f-smileage').value, notes=document.getElementById('f-notes').value.trim();
             if(!date) return alert(t('Please select a date.'));
@@ -290,13 +314,13 @@ const App = {
             if(isEdit){
                 const editType=document.getElementById('f-type').value;
                 const dupe=Storage.findDuplicateService({carId,type:editType,date,mileage},service.id);
-                if(dupe && !confirm(`Another ${editType} record already exists for this car on ${date} at the same mileage.\n\nSave anyway?`)) return;
+                if(dupe && !confirm(t('Another {type} record already exists for this car on {d} at the same mileage.\n\nSave anyway?',{type:I18N.t(editType),d:date}))) return;
                 const checkOnly=!!(document.getElementById('f-checkonly')||{}).checked;
                 const data={carId,type:editType,date,cost,mileage,notes,bills,padThickness,checkOnly,...this._readAccident(),
                     ...(Recommendations.isInspectionType(editType)?insp:{})};
                 if(!checkOnly){
-                    if(data.type==='Oil Change') this._handleOilReminder(data);
-                    else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date);
+                    if(data.type==='Oil Change') this._handleOilReminder(data,service.id);
+                    else if(mileage&&car) Recommendations.createReminderFromService(car,data.type,mileage,date,service.id);
                 }
                 Storage.updateService(service.id,data);
             } else {
@@ -307,12 +331,13 @@ const App = {
                 // With bills the total is already itemised, so it attaches to the first
                 // service only — splitting it again would double-count. Without bills the
                 // typed cost is shared evenly across the selected services as before.
-                const cps=(!bills.length&&selected.length>1)?(parseFloat(cost)/selected.length).toFixed(2):cost;
+                const share=parseFloat(cost)/selected.length;
+                const cps=(!bills.length&&selected.length>1)?(share>0?share.toFixed(2):''):cost;
                 // Guard against the same job being logged twice by a double-tap
                 const dupes=selected.filter(type=>Storage.findDuplicateService({carId,type,date,mileage}));
                 if(dupes.length){
-                    const list=dupes.join(', ');
-                    if(!confirm(`You already have a record for ${list} on ${date} at this mileage.\n\nAdd it again anyway?`)) return;
+                    const list=dupes.map(x=>I18N.t(x)).join(', ');
+                    if(!confirm(t('You already have a record for {list} on {d} at this mileage.\n\nAdd it again anyway?',{list,d:date}))) return;
                 }
                 // Logging a timing belt tells us the engine is belt-driven, which is what
                 // the schedule needs in order to stop ignoring it.
@@ -331,7 +356,12 @@ const App = {
                     Storage.addService(data);
                 });
             }
-            this._applyInspection(carId, insp, date);
+            // An old record must not rewrite today's certificate: it is not the newest
+            // inspection, or it ran out before the one the car holds now.
+            const held = (Storage.getCars().find(c=>c.id===carId)||{}).fahesExpiry;
+            const stale = !Recommendations.isNewest(carId,'Periodic Inspection',date,isEdit?service.id:null)
+                || (insp.inspectionExpiry && held && held > insp.inspectionExpiry);
+            if(!stale) this._applyInspection(carId, insp, date);
             Features.cleanupPhotos();
             this.closeModal(); this.renderPage(this.currentPage);
         });
@@ -431,7 +461,7 @@ const App = {
             : [...new Set([...document.querySelectorAll('.service-chips input:checked')].map(c => c.value))];
         const oil = document.getElementById('oil-options');
         const brake = document.getElementById('brake-options');
-        if (oil) oil.style.display = picked.includes('Oil Change') ? 'block' : 'none';
+        if (oil) oil.style.display = picked.includes('Oil Change') && !oil.dataset.locked ? 'block' : 'none';
         if (brake) brake.style.display = picked.some(t => Recommendations.isBrakeType(t)) ? 'block' : 'none';
         const insp = document.getElementById('inspection-options');
         if (insp) {
@@ -501,8 +531,7 @@ const App = {
         const date = dateEl.value;
         warn.innerHTML = '';
         if (!car || !km || !date) return;
-        const today = new Date().toISOString().split('T')[0];
-        if (date >= today) return;                       // not back-dated
+        if (date >= Storage.today()) return;             // not back-dated
         // What was the odometer actually reading around that date?
         const before = Storage.getOdometerReadings(car.id)
             .filter(r => r.date && r.date <= date).map(r => r.km);
@@ -532,37 +561,33 @@ const App = {
         else note.textContent = t('Your latest confirmed odometer reading - edit if needed.');
     },
 
-    _handleOilReminder(data) {
+    _handleOilReminder(data, ignoreId) {
+        if(!Recommendations.isNewest(data.carId,'Oil Change',data.date,ignoreId)) return;
         const interval=document.querySelector('input[name="oil-interval"]:checked');
-        data.oilInterval=interval?interval.value:'5000';
+        // No box ticked means a custom interval the three choices don't cover. Keep it.
+        if(interval) data.oilInterval=interval.value;
+        const car=data.carId?Storage.getCars().find(c=>c.id===data.carId):null;
         // The oil you use is a property of how you run the car, not of one past
         // service — so it becomes this car's Oil Change interval, which the whole
         // schedule already respects. Before this the choice fed only the Reminders
         // page while every other screen kept using Ford's figure, so switching
         // 7,000 to 5,000 appeared to do nothing at all.
-        if(data.carId){
-            const car=Storage.getCars().find(c=>c.id===data.carId);
-            const mfr=car?Recommendations.getForService(car.make,car.model,'Oil Change'):null;
+        if(car&&interval){
+            const mfr=Recommendations.getForService(car.make,car.model,'Oil Change');
             const lbl={'5000':'Regular','7000':'Semi-synthetic','10000':'Full synthetic'};
-            Recommendations.saveCustom(data.carId,'Oil Change',parseInt(data.oilInterval),
-                (mfr&&mfr.months)||6,t('Your oil choice: {label}',{label:t(lbl[data.oilInterval]||'Regular')}));
+            Recommendations.saveCustom(data.carId,'Oil Change',parseInt(interval.value),
+                (mfr&&mfr.months)||6,t('Your oil choice: {label}',{label:t(lbl[interval.value]||'Regular')}));
         }
-        if(data.mileage){
-            const next=parseInt(data.mileage)+parseInt(data.oilInterval);
-            Storage.getReminders(data.carId).filter(r=>r.type==='Oil Change'&&!r.completed&&r.autoCreated).forEach(r=>Storage.deleteReminder(r.id));
-            const labels={'5000':'Regular','7000':'Semi-synthetic','10000':'Full synthetic'};
-            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:this._estDate(data.date,data.oilInterval,data.carId),dueMileage:next.toString(),notes:`Auto: next oil change at ${next.toLocaleString()} km (${labels[data.oilInterval]})`,completed:false,autoCreated:true});
+        if(data.mileage&&car){
+            const rec=Recommendations.getEffective(car,'Oil Change');
+            const next=parseInt(data.mileage)+rec.km;
+            Storage.getReminders(data.carId).filter(r=>r.type==='Oil Change'&&!r.completed&&r.autoCreated).forEach(r=>Storage.dropReminder(r.id));
+            // The time limit, like every other reminder. The km limit is its own field;
+            // an estimate of when that will be reached belongs on screen, not in a
+            // date that later reads as a deadline.
+            const due=new Date(data.date); due.setMonth(due.getMonth()+(rec.months||6));
+            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:due.toISOString().split('T')[0],dueMileage:next.toString(),notes:`Auto: next oil change at ${next.toLocaleString()} km`,completed:false,autoCreated:true});
         }
-    },
-    // How long an interval takes at the rate this car is actually driven. The old
-    // constant of 40 km/day dated the next oil change 125 days out for a car doing
-    // 121 km/day, when the true answer was 41 — three times wrong, on the one date
-    // the Reminders page shows.
-    _estDate(d,interval,carId){
-        const rate=(carId&&Storage.getDailyKmRate(carId))||40;
-        const days=Math.round(parseInt(interval)/rate);
-        const dt=new Date(d); dt.setDate(dt.getDate()+days);
-        return dt.toISOString().split('T')[0];
     },
 
     // ── Fuel Modal ──
@@ -572,7 +597,7 @@ const App = {
         const html = `
             <div class="form-group"><label>${t('Car')}</label><select id="f-car">${cars.map(c=>`<option value="${c.id}" ${log&&log.carId===c.id?'selected':''}>${c.year} ${c.make} ${c.model}</option>`).join('')}</select></div>
             <div class="form-row">
-                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" value="${log?log.date:new Date().toISOString().split('T')[0]}"></div>
+                <div class="form-group"><label>${t('Date')}</label><input type="date" id="f-date" max="${Storage.today()}" value="${log?log.date:Storage.today()}"></div>
                 <div class="form-group"><label>${t('Odometer (km)')}</label><input type="number" id="f-odo" placeholder="50000" value="${log?log.odometer:''}"></div>
             </div>
             <div class="form-row">
@@ -580,7 +605,7 @@ const App = {
                 <div class="form-group"><label>${t('Price/Liter (SAR)')}</label><input type="number" id="f-ppl" placeholder="2.18" step="0.01" value="${log?log.pricePerLiter:''}"></div>
             </div>
             <div class="form-group"><label>${t('Total Cost (SAR)')}</label><input type="number" id="f-ftotal" placeholder="${t('Auto-calculated')}" step="0.01" value="${log?log.totalCost:''}"></div>
-            <div class="form-group"><label>${t('Station')}</label><input type="text" id="f-station" placeholder="${t('Optional')}" value="${log?log.station||'':''}"></div>`;
+            <div class="form-group"><label>${t('Station')}</label><input type="text" id="f-station" placeholder="${t('Optional')}" value="${log?esc(log.station):''}"></div>`;
         this.openModal(log?'Edit Fuel Log':'Add Fuel Log', html, () => {
             const liters=parseFloat(document.getElementById('f-liters').value)||0;
             const ppl=parseFloat(document.getElementById('f-ppl').value)||0;
@@ -611,7 +636,7 @@ const App = {
                 <div class="form-group"><label>${t('Due Date')}</label><input type="date" id="f-duedate" value="${reminder?reminder.dueDate:''}"></div>
                 <div class="form-group"><label>${t('Due Mileage (km)')}</label><input type="number" id="f-duemileage" placeholder="${t('Optional')}" value="${reminder?reminder.dueMileage||'':''}"></div>
             </div>
-            <div class="form-group"><label>${t('Notes')}</label><textarea id="f-rnotes" rows="2" placeholder="${t('Optional...')}">${reminder?reminder.notes||'':''}</textarea></div>`;
+            <div class="form-group"><label>${t('Notes')}</label><textarea id="f-rnotes" rows="2" placeholder="${t('Optional...')}">${reminder?esc(reminder.notes):''}</textarea></div>`;
         this.openModal(reminder?'Edit Reminder':'Add Reminder', html, () => {
             const data={carId:document.getElementById('f-car').value,type:document.getElementById('f-type').value,dueDate:document.getElementById('f-duedate').value,dueMileage:document.getElementById('f-duemileage').value,notes:document.getElementById('f-rnotes').value.trim(),completed:reminder?reminder.completed:false};
             if(!data.dueDate) return alert(t('Please select a due date.'));
@@ -624,13 +649,13 @@ const App = {
         const car=Storage.getCars().find(c=>c.id===carId);
         if(!car)return;
         const types=Recommendations.logTypes();
-        const html=`<p style="font-size:12px;color:var(--text3);margin-bottom:14px">Custom interval for <strong>${car.make} ${car.model}</strong>. Overrides manufacturer data.</p>
-            <div class="form-group"><label>Service Type</label><select id="f-rec-type">${types.map(t=>`<option value="${t}">${I18N.t(t)}</option>`).join('')}</select></div>
-            <div class="form-row"><div class="form-group"><label>Interval (km)</label><input type="number" id="f-rec-km" placeholder="15000"></div><div class="form-group"><label>Interval (months)</label><input type="number" id="f-rec-months" placeholder="12"></div></div>
-            <div class="form-group"><label>Note</label><input type="text" id="f-rec-note" placeholder="Per dealer recommendation"></div>`;
+        const html=`<p style="font-size:12px;color:var(--text3);margin-bottom:14px">${t('Custom interval for {car}. Overrides manufacturer data.',{car:`<strong>${car.make} ${car.model}</strong>`})}</p>
+            <div class="form-group"><label>${t('Service Type')}</label><select id="f-rec-type">${types.map(t=>`<option value="${t}">${I18N.t(t)}</option>`).join('')}</select></div>
+            <div class="form-row"><div class="form-group"><label>${t('Interval (km)')}</label><input type="number" id="f-rec-km" placeholder="15000"></div><div class="form-group"><label>${t('Interval (months)')}</label><input type="number" id="f-rec-months" placeholder="12"></div></div>
+            <div class="form-group"><label>${t('Note')}</label><input type="text" id="f-rec-note" placeholder="${t('Per dealer recommendation')}"></div>`;
         this.openModal('Custom Maintenance Schedule',html,()=>{
             const km=parseInt(document.getElementById('f-rec-km').value),months=parseInt(document.getElementById('f-rec-months').value)||12,note=document.getElementById('f-rec-note').value.trim()||'Custom';
-            if(!km||km<=0) return alert('Enter a valid km interval.');
+            if(!km||km<=0) return alert(t('Enter a valid km interval.'));
             Recommendations.saveCustom(carId,document.getElementById('f-rec-type').value,km,months,note);
             this.closeModal(); this.renderPage(this.currentPage);
         });
@@ -723,7 +748,7 @@ const App = {
                 // A null score means nothing is known well enough to score
                 const offset=circ-((h.score===null?0:h.score)/100)*circ;
                 const svcCount=Storage.getServices(c.id).length;
-                const overdueC=Storage.getUpcomingReminders(c.id).filter(r=>new Date(r.dueDate)<new Date()).length;
+                const overdueC=Storage.getOverdueCount(c);
                 return `<div class="health-card">
                     <div class="health-ring"><svg width="70" height="70" viewBox="0 0 64 64"><circle class="health-ring-bg" cx="32" cy="32" r="28"/><circle class="health-ring-fg ${h.color}" cx="32" cy="32" r="28" stroke-dasharray="${circ}" stroke-dashoffset="${offset}"/></svg><div class="health-score">${h.score===null?'—':h.score}</div></div>
                     <div class="health-info"><div class="health-car-name">${c.make} ${c.model}</div><div class="health-car-year"><bdi>${c.year}</bdi> &middot; <bdi>${(()=>{const p=Storage.getProjectedMileage(c);return p.km?(p.estimated?'~':'')+p.km.toLocaleString()+' km':'-';})()}</bdi></div><span class="health-label ${h.color}">${t(h.label)}</span><div class="health-details">${h.unknownItems?t('scored on {a} of {b} items',{a:h.totalItems,b:h.totalItems+h.unknownItems})+' &middot; ':''}${t('{n} services',{n:svcCount})}${overdueC?` &middot; <span style="color:var(--red)">${t('{n} overdue',{n:overdueC})}</span>`:''}</div></div>
@@ -745,7 +770,8 @@ const App = {
 
         // Upcoming reminders
         const remEl=document.getElementById('upcoming-reminders');
-        remEl.innerHTML=reminders.slice(0,5).length?reminders.slice(0,5).map(r=>{const car=cars.find(c=>c.id===r.carId);const days=Math.ceil((new Date(r.dueDate)-new Date())/86400000);let badge='badge-blue';if(days<0)badge='badge-red';else if(days<=7)badge='badge-orange';const label=days<0?t('{d}d overdue',{d:Math.abs(days)}):days===0?t('Today'):t('In {d}d',{d:days});return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(r.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:''}</small></div><span class="badge ${badge}">${label}</span></div>`;}).join(''):`<p class="empty-state">${t("No upcoming reminders")}</p>`;
+        const badgeFor={overdue:'badge-red',soon:'badge-orange'};
+        remEl.innerHTML=reminders.length?reminders.slice(0,5).map(r=>{const car=cars.find(c=>c.id===r.carId);const st=Storage.getReminderStatus(r,car);return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid var(--border)"><div><strong style="font-size:13px">${I18N.t(r.type)}</strong><br><small style="color:var(--text3)">${car?car.make+' '+car.model:''}</small></div><span class="badge ${badgeFor[st.status]||'badge-blue'}">${st.detail}</span></div>`;}).join(''):`<p class="empty-state">${t("No upcoming reminders")}</p>`;
     },
 
     // ── Render: Cars ──
@@ -800,30 +826,30 @@ const App = {
             if(own && (own.maint12>0 || own.hasValue)){
                 const vClass=own.verdict==='consider'?'red':own.verdict==='watch'?'orange':'green';
                 ownHTML=`<div class="own-block own-${own.verdict||'none'}">
-                    <div class="own-head"><span class="own-title">${t("Running Cost (last 12 months)")}</span>${own.headline?`<span class="badge badge-${vClass}">${own.headline}</span>`:''}</div>
+                    <div class="own-head"><span class="own-title">${t("Running Cost (last 12 months)")}</span>${own.headline?`<span class="badge badge-${vClass}">${t(own.headline)}</span>`:''}</div>
                     <div class="own-stats">
                         <div class="own-stat"><span class="own-val">${own.maint12.toFixed(0)}</span><span class="own-lab">${t("SAR maintenance")}</span></div>
                         <div class="own-stat"><span class="own-val">${own.km12?own.km12.toLocaleString():'—'}</span><span class="own-lab">${t("km per year")}</span></div>
                         <div class="own-stat"><span class="own-val">${own.maintPerKm!==null?own.maintPerKm.toFixed(2):'—'}</span><span class="own-lab">${t("SAR/km upkeep")}</span></div>
                     </div>
                     ${own.hasValue
-                        ? `<div class="own-note">Maintenance is <strong>${Math.round(own.ratio*100)}%</strong> of the car's ${own.value.toLocaleString()} SAR value.${own.verdict==='consider'?' Once yearly upkeep passes about a third of what the car is worth, replacing it usually costs less than keeping it.':own.verdict==='watch'?' Worth watching — still cheaper than replacing.':' Comfortably worth keeping.'}</div>`
+                        ? `<div class="own-note">${t("Maintenance is {p} of the car's {v} SAR value.",{p:`<strong>${Math.round(own.ratio*100)}%</strong>`,v:own.value.toLocaleString()})} ${t(own.verdict==='consider'?'Once yearly upkeep passes about a third of what the car is worth, replacing it usually costs less than keeping it.':own.verdict==='watch'?'Worth watching — still cheaper than replacing.':'Comfortably worth keeping.')}</div>`
                         : `<div class="own-note">${t("Add a market value in Edit to see whether this car is still worth keeping.")}</div>`}
                 </div>`;
             }
             // Recall / safety notes
             let recallHTML='';
             if(c.recallNotes&&c.recallNotes.trim()){
-                recallHTML=`<div class="recall-note"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${c.recallNotes}</span></div>`;
+                recallHTML=`<div class="recall-note"><svg viewBox="0 0 24 24" width="16" height="16"><path d="M12 9v4M12 17h.01M10.3 3.9L1.8 18a2 2 0 001.7 3h17a2 2 0 001.7-3L13.7 3.9a2 2 0 00-3.4 0z" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg><span>${esc(c.recallNotes)}</span></div>`;
             }
             // Tire info
             let tireHTML='';
             if(c.tires&&c.tires.brand){
                 tireHTML=`<div class="tire-info"><div class="tire-info-title">${t("Tires")}</div>
-                    <div class="tire-detail"><span>Brand / Size</span><span>${c.tires.brand} ${c.tires.size||''}</span></div>
-                    ${c.tires.installedDate?`<div class="tire-detail"><span>Installed</span><span>${c.tires.installedDate}${c.tires.installedMileage?' at '+parseInt(c.tires.installedMileage).toLocaleString()+' km':''}</span></div>`:''}
-                    ${c.tires.warrantyKm?`<div class="tire-detail"><span>Warranty</span><span>${parseInt(c.tires.warrantyKm).toLocaleString()} km</span></div>`:''}
-                    <div class="tire-detail"><span>Rotation</span><span>${c.tires.pattern||'cross'}</span></div>
+                    <div class="tire-detail"><span>${t('Brand / Size')}</span><span>${esc(c.tires.brand)} ${esc(c.tires.size)}</span></div>
+                    ${c.tires.installedDate?`<div class="tire-detail"><span>${t('Installed')}</span><span>${c.tires.installedDate}${c.tires.installedMileage?' '+t('at {km} km',{km:parseInt(c.tires.installedMileage).toLocaleString()}):''}</span></div>`:''}
+                    ${c.tires.warrantyKm?`<div class="tire-detail"><span>${t('Warranty')}</span><span>${parseInt(c.tires.warrantyKm).toLocaleString()} km</span></div>`:''}
+                    <div class="tire-detail"><span>${t('Rotation')}</span><span>${t(Features.TIRE_PATTERNS[c.tires.pattern]||Features.TIRE_PATTERNS.cross)}</span></div>
                 </div>`;
             }
             return `<div class="car-card">
@@ -832,7 +858,7 @@ const App = {
                     <div class="odo-block-main">
                         <div class="odo-block-label">${t('Odometer')}${proj.estimated?` <span class="odo-badge">${t('est.')}</span>`:''}</div>
                         <div class="odo-block-value">${effKm?effKm.toLocaleString():'—'} <small>km</small></div>
-                        <div class="odo-block-sub">${proj.lastKm?`Last read ${proj.lastKm.toLocaleString()} km${fresh.daysSince!==null?` · ${fresh.daysSince===0?'today':fresh.daysSince+'d ago'}`:''}`:'No reading yet'}${proj.rate?` · ${proj.rate.toFixed(0)} km/day`:''}</div>
+                        <div class="odo-block-sub">${proj.lastKm?`${t('Last read {km} km',{km:proj.lastKm.toLocaleString()})}${fresh.daysSince!==null?` · ${fresh.daysSince===0?t('today'):t('{d}d ago',{d:fresh.daysSince})}`:''}`:t('No reading yet')}${proj.rate?` · ${proj.rate.toFixed(0)} ${t('km/day')}`:''}</div>
                     </div>
                     <button class="btn btn-primary btn-sm odo-block-btn" onclick="Features.openOdometerModal('${c.id}')">${t('Update')}</button>
                 </div>
@@ -851,7 +877,7 @@ const App = {
                     ${hasRecs?`<button class="btn btn-secondary btn-sm" onclick="App.openCustomRecModal('${c.id}')">${t("+ Custom")}</button>`:''}
                     <button class="btn btn-secondary btn-sm" onclick="Features.openTireModal('${c.id}')">${t("Tires")}</button>
                     <button class="btn btn-secondary btn-sm" onclick="Features.printServiceHistory('${c.id}')">${t("Print History")}</button>
-                    <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this car and all records?')){Storage.deleteCar('${c.id}');App.renderPage(App.currentPage);}">${t("Delete")}</button>
+                    <button class="btn btn-danger btn-sm" onclick="if(confirm(t('Delete this car and all records?'))){Storage.deleteCar('${c.id}');App.renderPage(App.currentPage);}">${t("Delete")}</button>
                 </div>
             </div>`;
         }).join('');
@@ -879,7 +905,7 @@ const App = {
         const countEl=document.getElementById('svc-count');
         if(countEl) countEl.textContent = q ? `${services.length} / ${total}` : (total? String(total) : '');
         if(!services.length){el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><path d="M38 14a2 2 0 010 2.8l3.2 3.2a2 2 0 012.8 0l6-6A10 10 0 0136 28L21.2 42.8a4.2 4.2 0 01-6-6L30 22A10 10 0 0144 8l-6 6z" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><path d="M24 40l-4 4" stroke="var(--text3)" stroke-width="2" stroke-linecap="round" opacity=".4"/></svg></div><p class="empty-state-text">${q?t("Nothing matched your search"):t("No services recorded")}</p></div>`;return;}
-        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Service")}</th><th>${t("Mileage")}</th><th>${t("Bills")}</th><th>${t("Cost")}</th><th>${t("Actions")}</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td data-label="${t('Date')}">${s.date}</td><td data-label="${t('Car')}">${car?car.year+' '+car.make+' '+car.model:'?'}</td><td data-label="${t('Service')}"><span class="svc-tags"><span class="badge badge-green">${I18N.t(s.type)}</span>${Features.accidentBadge(s)}</span></td><td data-label="${t('Mileage')}">${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td data-label="${t('Bills')}">${Features.billsCell(s)}</td><td data-label="${t('Cost')}">${Features.costCell(s)}</td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this service record?')){Storage.deleteService('${s.id}');Features.cleanupPhotos();App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
+        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Service")}</th><th>${t("Mileage")}</th><th>${t("Bills")}</th><th>${t("Cost")}</th><th>${t("Actions")}</th></tr></thead><tbody>${services.map(s=>{const car=cars.find(c=>c.id===s.carId);return `<tr><td data-label="${t('Date')}">${s.date}</td><td data-label="${t('Car')}">${car?car.year+' '+car.make+' '+car.model:'?'}</td><td data-label="${t('Service')}"><span class="svc-tags"><span class="badge badge-green">${I18N.t(s.type)}</span>${Features.accidentBadge(s)}</span></td><td data-label="${t('Mileage')}">${s.mileage?parseInt(s.mileage).toLocaleString()+' km':'-'}</td><td data-label="${t('Bills')}">${Features.billsCell(s)}</td><td data-label="${t('Cost')}">${Features.costCell(s)}</td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openServiceModal(Storage.getServices().find(x=>x.id==='${s.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm(t('Delete this service record?'))){Storage.deleteService('${s.id}');Features.cleanupPhotos();App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Fuel ──
@@ -915,8 +941,8 @@ const App = {
         } else { chartEl.style.display='none'; }
 
         const el=document.getElementById('fuel-list');
-        if(!logs.length){el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="12" y="10" width="24" height="40" rx="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M36 24h6a4 4 0 014 4v8a4 4 0 004 4h0a4 4 0 004-4V20l-6-6" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="18" y="18" width="12" height="10" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">${t("No fuel logs yet")}</p><p class="warranty-empty-hint">Logging fill-ups unlocks consumption tracking (L/100km), true cost per kilometre, and an early warning when fuel use jumps \u2014 often the first sign of low tyre pressure, a clogged filter or a failing sensor.</p></div>`;return;}
-        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Odometer")}</th><th>${t("Liters")}</th><th>SAR/L</th><th>${t("Total")}</th><th>${t("Actions")}</th></tr></thead><tbody>${logs.map(f=>{const car=cars.find(c=>c.id===f.carId);return `<tr><td data-label="${t('Date')}">${f.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Odometer')}">${parseInt(f.odometer).toLocaleString()} km</td><td data-label="${t('Liters')}">${f.liters} L</td><td data-label="${t('SAR/L')}">${f.pricePerLiter}</td><td data-label="${t('Total')}"><strong>${parseFloat(f.totalCost).toFixed(0)} SAR</strong></td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openFuelModal(Storage.getFuelLogs().find(x=>x.id==='${f.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm('Delete this fuel log?')){Storage.deleteFuelLog('${f.id}');App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
+        if(!logs.length){el.innerHTML=`<div class="empty-state"><div class="empty-state-icon"><svg width="64" height="64" viewBox="0 0 64 64" fill="none"><rect x="12" y="10" width="24" height="40" rx="4" stroke="var(--text3)" stroke-width="2.5" fill="none"/><path d="M36 24h6a4 4 0 014 4v8a4 4 0 004 4h0a4 4 0 004-4V20l-6-6" stroke="var(--text3)" stroke-width="2.5" fill="none" stroke-linecap="round"/><rect x="18" y="18" width="12" height="10" rx="2" stroke="var(--text3)" stroke-width="1.5" fill="none" opacity=".4"/></svg></div><p class="empty-state-text">${t("No fuel logs yet")}</p><p class="warranty-empty-hint">${t('Logging fill-ups unlocks consumption tracking (L/100km), true cost per kilometre, and an early warning when fuel use jumps \u2014 often the first sign of low tyre pressure, a clogged filter or a failing sensor.')}</p></div>`;return;}
+        el.innerHTML=`<table><thead><tr><th>${t("Date")}</th><th>${t("Car")}</th><th>${t("Odometer")}</th><th>${t("Liters")}</th><th>SAR/L</th><th>${t("Total")}</th><th>${t("Actions")}</th></tr></thead><tbody>${logs.map(f=>{const car=cars.find(c=>c.id===f.carId);return `<tr><td data-label="${t('Date')}">${f.date}</td><td data-label="${t('Car')}">${car?car.make+' '+car.model:'?'}</td><td data-label="${t('Odometer')}">${parseInt(f.odometer).toLocaleString()} km</td><td data-label="${t('Liters')}">${f.liters} L</td><td data-label="${t('SAR/L')}">${f.pricePerLiter}</td><td data-label="${t('Total')}"><strong>${parseFloat(f.totalCost).toFixed(0)} SAR</strong></td><td data-label="${t('Actions')}" class="row-actions"><button class="btn btn-secondary btn-sm" onclick="App.openFuelModal(Storage.getFuelLogs().find(x=>x.id==='${f.id}'))">${t("Edit")}</button> <button class="btn btn-danger btn-sm" onclick="if(confirm(t('Delete this fuel log?'))){Storage.deleteFuelLog('${f.id}');App.renderPage(App.currentPage);}">${t("Delete")}</button></td></tr>`;}).join('')}</tbody></table>`;
     },
 
     // ── Render: Expenses ──
@@ -976,7 +1002,7 @@ const App = {
             const sl=r.completed
                 ?`<span class="badge badge-green">${t("Done")}</span>`
                 :`<span class="badge badge-${badgeMap[st.status]}">${st.detail}</span>`;
-            return `<div class="reminder-card ${sc}"><div class="reminder-card-header"><span class="reminder-card-title">${I18N.t(r.type)}</span>${sl}</div><div class="reminder-card-car">${car?car.year+' '+car.make+' '+car.model:''}</div><div class="reminder-card-date">${t("Due")}: ${r.dueDate}${r.dueMileage?' or at '+parseInt(r.dueMileage).toLocaleString()+' km':''}</div>${r.notes?`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${t(r.notes)}</div>`:''}<div class="reminder-card-actions">${!r.completed?`<button class="btn btn-primary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:true});App.renderPage(App.currentPage);">${t("Done")}</button>`:`<button class="btn btn-secondary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:false});App.renderPage(App.currentPage);">${t("Undo")}</button>`}${!r.completed?`<button class="btn btn-secondary btn-sm" onclick="Storage.snoozeReminder('${r.id}',7);App.renderPage(App.currentPage);">${t("Snooze 1w")}</button>`:''}<button class="btn btn-secondary btn-sm" onclick="App.openReminderModal(Storage.getReminders().find(x=>x.id==='${r.id}'))">${t("Edit")}</button><button class="btn btn-danger btn-sm" onclick="if(confirm('Delete?')){Storage.deleteReminder('${r.id}');App.renderPage(App.currentPage);}">${t('Delete')}</button></div></div>`;
+            return `<div class="reminder-card ${sc}"><div class="reminder-card-header"><span class="reminder-card-title">${I18N.t(r.type)}</span>${sl}</div><div class="reminder-card-car">${car?car.year+' '+car.make+' '+car.model:''}</div><div class="reminder-card-date">${t("Due")}: ${r.dueDate}${r.dueMileage?' '+t('or at {km} km',{km:parseInt(r.dueMileage).toLocaleString()}):''}</div>${r.notes?`<div style="font-size:12px;color:var(--text3);margin-bottom:10px">${Features.reminderNote(r)}</div>`:''}<div class="reminder-card-actions">${!r.completed?`<button class="btn btn-primary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:true});App.renderPage(App.currentPage);">${t("Done")}</button>`:`<button class="btn btn-secondary btn-sm" onclick="Storage.updateReminder('${r.id}',{completed:false});App.renderPage(App.currentPage);">${t("Undo")}</button>`}${!r.completed?`<button class="btn btn-secondary btn-sm" onclick="Storage.snoozeReminder('${r.id}',7);App.renderPage(App.currentPage);">${t("Snooze 1w")}</button>`:''}<button class="btn btn-secondary btn-sm" onclick="App.openReminderModal(Storage.getReminders().find(x=>x.id==='${r.id}'))">${t("Edit")}</button><button class="btn btn-danger btn-sm" onclick="if(confirm(t('Delete?'))){Storage.deleteReminder('${r.id}');App.renderPage(App.currentPage);}">${t('Delete')}</button></div></div>`;
         }).join('');
     }
 };

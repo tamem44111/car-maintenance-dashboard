@@ -41,10 +41,17 @@ const Checks = {
     // = 109.59 km/day. Every service sits *inside* that window on both date and
     // mileage, so adding one never moves the first or last reading and the rate
     // stays a fixed, checkable number.
+    // Local calendar days, the same way the app counts them. Saudi Arabia is UTC+3,
+    // so a UTC "today" is still yesterday for the first three hours of every day.
+    localDay(n) {
+        const d = new Date(Date.now() - n * 86400000);
+        return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0');
+    },
+
     RATE: 40000 / 365,          // lifetime: 60,000 -> 100,000 over 365 days
     RATE_RECENT: 3300 / 30,     // recent window: 96,700 (day 30) -> 100,000 (today)
     fixture() {
-        const day = n => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
+        const day = n => this.localDay(n);
         return {
             cars: [{
                 id: 'test-car', make: 'Ford', model: 'Taurus', year: '2013',
@@ -82,7 +89,7 @@ const Checks = {
     async logic(A) {
         const { Storage, Recommendations, Features, App } = A;
         const car = Storage.getCars()[0];
-        const day = n => new Date(Date.now() - n * 86400000).toISOString().split('T')[0];
+        const day = n => this.localDay(n);
 
         // -- odometer projection --
         // The fixture's last two readings are 30 days and 3,300 km apart, which
@@ -345,13 +352,6 @@ const Checks = {
         this.eq('restoring the car brings its postponements back',
             Storage.getAll().snoozes.filter(s => s.carId === 'test-car').length, 1);
         this.seed(A.W);
-
-        // -- the reminder date must use the rate this car is actually driven at --
-        const rate = Storage.getDailyKmRate('test-car');
-        const est = App._estDate(day(0), 5000, 'test-car');
-        const days = Math.round((new Date(est) - new Date(day(0))) / 86400000);
-        this.near('an interval is dated at the real driving rate', days, Math.round(5000 / rate), 1);
-        this.ok('which is not the old flat 40 km/day guess', Math.abs(days - 125) > 5, `${days} days`);
 
         // -- postponing: changes when you are told, never whether it is due --
         const air0 = Recommendations.getMaintenanceStatus(car, 'Air Filter');
@@ -617,9 +617,16 @@ const Checks = {
         W.localStorage.setItem('autocare_data', saved);
 
         // -- Arabic sweep: report, do not fail. Known gaps live in README open items. --
+        // Fill in what the empty fixture leaves out, so the sweep reaches the keep-or-sell
+        // note, the tyre block and a warranty card.
+        Storage.updateCar('test-car', { marketValue: '25000', tires: { brand: 'X', size: '235', installedDate: '2026-01-01', installedMileage: '90000', pattern: 'forward' } });
+        Storage.addService({ carId: 'test-car', type: 'Battery', date: this.localDay(40), mileage: '95000', cost: '300',
+            bills: [{ id: 'b1', kind: 'Parts', label: '', vendor: 'X', photoIds: [], amount: '300', warrantyMonths: '24', warrantyKm: '', startKm: '95000', date: this.localDay(40) }] });
         I18N.set('ar'); I18N.translateDOM();
         const untranslated = [];
-        const allow = /SAR|km\b|mm|^L$|Ford|Taurus|^\d|📷|^[\d\s.,:%~+\-\/()·—–▲▼×]*$/;
+        // Only bare figures are exempt. This used to allow any text containing "km"
+        // or "SAR", which hid whole sentences of English.
+        const allow = /^[~\d\s.,:%+\-\/()·—–▲▼×]*(km|SAR|mm|L|L\/100km|SAR\/km|%)?[\s.,]*$|^(km|SAR|SAR\/km|L)$|\d SAR \(\d+%\)$|Ford|Taurus|^AutoCare$|📷|^English$|^العربية$|^A R J|^X( 235)?$/;
         for (const p of pages) {
             App.navigate(p);
             const walk = D.createTreeWalker(D.getElementById('page-' + p), W.NodeFilter.SHOW_TEXT);
@@ -635,15 +642,32 @@ const Checks = {
         // The Add Service modal is the densest form in the app; sweep inside it too,
         // since the page-level walk never opens it.
         const modalGaps = [];
-        [['add service', () => App.openServiceModal()],
-         ['add fuel', () => App.openFuelModal()],
-         ['add reminder', () => App.openReminderModal()]].forEach(([name, open]) => {
-            open();
-            D.querySelectorAll('#modal label, #modal small, #modal .bills-title').forEach(el => {
-                const txt = (el.textContent || '').trim();
-                if (!txt || /[؀-ۿ]/.test(txt) || allow.test(txt)) return;
+        const walkModal = name => {
+            const walk = D.createTreeWalker(D.getElementById('modal'), W.NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walk.nextNode())) {
+                const txt = n.textContent.trim();
+                if (!txt || /[؀-ۿ]/.test(txt) || allow.test(txt)) continue;
                 modalGaps.push(`${name}: ${txt.slice(0, 45)}`);
-            });
+            }
+        };
+        const fillIn = () => { D.querySelectorAll('#modal select').forEach(sel => sel.dispatchEvent(new W.Event('change'))); };
+        [['add service', () => App.openServiceModal()],
+         ['edit service', () => App.openServiceModal(Storage.getServices('test-car').find(s => s.type === 'Battery'))],
+         ['add fuel', () => App.openFuelModal()],
+         ['add reminder', () => App.openReminderModal()],
+         ['edit car', () => App.openCarModal(Storage.getCars()[0])],
+         ['odometer', () => Features.openOdometerModal('test-car')],
+         ['tyres', () => Features.openTireModal('test-car')],
+         ['settings', () => Features.showSettingsModal()],
+         ['custom interval', () => App.openCustomRecModal('test-car')],
+         ['repeat', () => App.openRepeatPicker()],
+         ['document', () => Features.openDocumentModal('test-car', 'fahesExpiry')],
+         ['postpone', () => Features.openSnoozeModal('test-car', 'Air Filter')],
+         ['trip', () => Features.openTripModal('test-car')]].forEach(([name, open]) => {
+            open();
+            fillIn();
+            walkModal(name);
             D.querySelectorAll('#modal [placeholder]').forEach(el => {
                 const txt = el.getAttribute('placeholder').trim();
                 if (!txt || /[؀-ۿ]/.test(txt) || allow.test(txt)) return;
@@ -680,6 +704,8 @@ const Checks = {
             await this.logic(A);
             this.seed(W);
             await this.render(A);
+            this.seed(W);
+            await this.regressions(A);
         } catch (e) {
             this.failures.push({ name: 'the run itself threw', detail: e.message + '\n' + (e.stack || '').split('\n')[1] });
         } finally {
@@ -689,6 +715,376 @@ const Checks = {
             this._paint(true);
         }
         return { passed: this.passes.length, failed: this.failures.length, warned: this.warnings.length };
+    },
+
+    // Everything here was found by running the owner's real backup through the app
+    // with the clock moved forward, then driving the same screens he drives. Each
+    // block is one failure he would actually have hit, so each runs on its own:
+    // one throwing must not hide the rest.
+    async regressions(A) {
+        const { Storage, Recommendations, Features, App, I18N, W, D } = A;
+        const day = n => this.localDay(n);
+        const tick = ms => new Promise(r => setTimeout(r, ms));
+        const tapSave = () => D.getElementById('modal-save').click();
+        const custom = (type, km, months) => Recommendations.saveCustom('test-car', type, km, months || 6, 'test');
+        const firstCar = () => Storage.getCars()[0];
+        const T = async (name, fn) => {
+            try { await fn(); }
+            catch (e) { this.failures.push({ name: name + ' (threw)', detail: e.message }); }
+            try { App.closeModal(); } catch (e) {}
+            const clear = D.getElementById('photo-viewer'); if (clear) clear.remove();
+            W.Date = realDate;
+            this.seed(W);
+        };
+        const realDate = W.Date;
+        // Freeze the app's clock. The app reads the global Date at call time.
+        const freeze = iso => {
+            const fixed = new realDate(iso).getTime();
+            W.Date = class extends realDate {
+                constructor(...a) { if (a.length) super(...a); else super(fixed); }
+                static now() { return fixed; }
+            };
+        };
+        const backupFile = over => new W.File([JSON.stringify({
+            formatVersion: 2, cars: firstCar() ? Storage.getCars() : [], services: Storage.getServices('all'),
+            reminders: Storage.getReminders('all'), fuelLogs: [], odometerLogs: Storage.getOdometerLogs('all'),
+            trash: [], snoozes: [], customRecs: {}, photos: {},
+            settings: { climate: 'normal', mechanics: [], theme: 'light', lang: 'en', fuel: { mode: 'off', lp100: '', price: '2.33', monthly: '' } },
+            ...over
+        })], 'backup.json');
+
+        // -- importing --
+        await T('import from Settings', async () => {
+            Features.saveFuelSettings({ mode: 'off', lp100: '' });
+            Features.showSettingsModal();
+            await tick(40);
+            const fuel = { mode: 'consumption', lp100: '11.6', price: '2.33', monthly: '' };
+            await Features.importData(backupFile({ settings: { climate: 'normal', mechanics: [], theme: 'light', lang: 'en', fuel } }));
+            this.ok('an import asks before it changes anything', !!D.getElementById('imp-replace') && !!D.getElementById('imp-merge'));
+            this.eq('and nothing has changed yet', Features.getFuelSettings().mode, 'off');
+            await Features._applyImport('replace');
+            this.eq('importing closes Settings, so its stale form cannot be saved back over the import',
+                D.getElementById('modal').style.display, 'none');
+            this.eq('the imported fuel setting survives', Features.getFuelSettings().lp100, '11.6');
+        });
+        await T('cancelling an import', async () => {
+            const before = Storage.getServices('all').length;
+            await Features.importData(backupFile({ services: [] }));
+            D.getElementById('modal-cancel').click();
+            this.eq('Cancel really means cancel', Storage.getServices('all').length, before);
+            this.eq('and it leaves nothing pending', Features._pendingImport, null);
+        });
+        await T('merging an import', async () => {
+            custom('Oil Change', 7000);
+            W.localStorage.setItem('autocare_climate', 'severe');
+            await Features.importData(backupFile({
+                customRecs: { 'test-car': { 'Oil Change': { km: 5000, months: 6, note: 'x' }, Battery: { km: 60000, months: 36, note: 'x' } } }
+            }));
+            await Features._applyImport('merge');
+            this.eq('adding from a file keeps the interval this phone already has',
+                Recommendations.getEffective(firstCar(), 'Oil Change').km, 7000);
+            this.eq('and fills in the ones it lacks', Recommendations.getEffective(firstCar(), 'Battery').km, 60000);
+            this.eq('and leaves this phone\'s settings alone', W.localStorage.getItem('autocare_climate'), 'severe');
+        });
+        await T('importing an older file', async () => {
+            await Features.importData(backupFile({ services: Storage.getServices('all').filter(s => s.id === 's-air') }));
+            this.ok('replacing newer records with an older file says so', !!D.querySelector('#modal .imp-warn'));
+        });
+
+        // -- language --
+        await T('changing language from Settings', async () => {
+            App.navigate('services');
+            Features.showSettingsModal();
+            await tick(40);
+            D.getElementById('f-lang').value = 'ar';
+            tapSave();
+            this.ok('the page title follows', /[؀-ۿ]/.test(D.getElementById('page-title').textContent), D.getElementById('page-title').textContent);
+            this.ok('the add button follows', /[؀-ۿ]/.test(D.getElementById('add-btn').textContent), D.getElementById('add-btn').textContent);
+            this.eq('the language switch shows the right side', D.querySelector('.lang-btn.active').dataset.lang, 'ar');
+            I18N.set('en'); I18N.translateDOM(); App.navigate('dashboard');
+        });
+
+        // -- dates --
+        await T('just after midnight', async () => {
+            // 22:30 UTC is 01:30 the next day in Saudi Arabia
+            freeze('2026-11-05T22:30:00Z');
+            const now = new W.Date();
+            const local = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+            App.openServiceModal(null, 'test-car', 'Oil Change');
+            this.eq('a form opens on the local date', D.getElementById('f-date').value, local);
+            this.eq('and allows it', D.getElementById('f-date').max, local);
+            App.closeModal();
+            this.ok('a reading dated today is accepted', !!Storage.logOdometer('test-car', 101000, local));
+        });
+        await T('last month', async () => {
+            freeze('2026-11-05T12:00:00');
+            const all = Storage.getAll();
+            all.services = [
+                { id: 'a', carId: 'test-car', type: 'Oil Change', date: '2026-10-10', cost: '500', mileage: '' },
+                { id: 'b', carId: 'test-car', type: 'Oil Change', date: '2026-09-10', cost: '100', mileage: '' }
+            ];
+            Storage.save(all);
+            this.eq('"vs last month" compares against last month', Storage.getSpendTrend('all').previous, 500);
+        });
+        await T('due today', async () => {
+            freeze(day(0) + 'T12:00:00');
+            const r = { id: 'r1', carId: 'test-car', type: 'Other', dueDate: day(0), dueMileage: '', completed: false };
+            const st = Storage.getReminderStatus(r, firstCar());
+            this.ok('something due today is not overdue yet', st.status !== 'overdue', st.status);
+            this.eq('and says so', st.detail, 'Due today');
+        });
+
+        // -- new tyres --
+        await T('fitting new tyres', async () => {
+            const add = s => Storage.addService({ carId: 'test-car', cost: '', ...s });
+            add({ type: 'Tire Rotation', date: day(170), mileage: '' });
+            this.ok('rotation is coming due on the old set',
+                Recommendations.getMaintenanceStatus(firstCar(), 'Tire Rotation').status !== 'ok');
+            add({ type: 'Tires', date: day(20), mileage: '98000', checkOnly: true });
+            this.ok('checking the tyres does not restart rotation',
+                Recommendations.getMaintenanceStatus(firstCar(), 'Tire Rotation').lastServiced === day(170));
+            add({ type: 'Tires', date: day(20), mileage: '98000' });
+            const st = Recommendations.getMaintenanceStatus(firstCar(), 'Tire Rotation');
+            this.eq('a new set restarts the rotation clock', st.status, 'ok');
+            this.eq('counted from the fitting', st.nextKm, 98000 + st.rec.km);
+        });
+
+        await T('the limit that arrives first', async () => {
+            custom('Oil Change', 7000);
+            freeze(new realDate(realDate.now() + 40 * 86400000).toISOString());
+            Storage.addService({ carId: 'test-car', type: 'Oil Change', date: Checks.localDay(-40), mileage: '104400', cost: '200' });
+            const st = Recommendations.getMaintenanceStatus(firstCar(), 'Oil Change');
+            this.eq('just after a service it names the limit that comes first', st.binding, 'km');
+            this.ok('in km, not the six-month limit', st.detail.includes('km left'), st.detail);
+        });
+        await T('a job with no km on record', async () => {
+            Storage.addService({ carId: 'test-car', type: 'Tire Rotation', date: day(10), mileage: '', cost: '' });
+            const st = Recommendations.getMaintenanceStatus(firstCar(), 'Tire Rotation');
+            this.eq('there is no distance to count down', st.kmDaysRemaining, null);
+            this.eq('so it runs on the calendar', st.binding, 'time');
+            this.eq('and its due date is the calendar date', st.dueDate, st.nextDate);
+        });
+
+        // -- reminders are a view of the schedule --
+        await T('a reminder cannot contradict the schedule', async () => {
+            custom('Oil Change', 7000);
+            App.renderPage('reminders');
+            // the owner's real oil reminder: a km estimate frozen as a calendar date
+            Storage.addReminder({ carId: 'test-car', type: 'Oil Change', dueDate: day(3), dueMileage: '103700',
+                completed: false, autoCreated: true, notes: 'Auto: next oil change at 103,700 km (7,000 km interval)' });
+            App.renderPage('reminders');
+            const st = Recommendations.getMaintenanceStatus(firstCar(), 'Oil Change');
+            const r = Storage.getReminders('test-car').find(x => x.type === 'Oil Change');
+            this.eq('its date is the schedule\'s time limit', r.dueDate, st.nextDate);
+            this.eq('its km is the schedule\'s', r.dueMileage, String(st.nextKm));
+            const car = firstCar();
+            let clashes = 0;
+            [10, 30, 60, 90, 150, 200].forEach(n => {
+                freeze(new realDate(realDate.now() + n * 86400000).toISOString());
+                Storage.getReminders('test-car').forEach(rem => {
+                    const s = Recommendations.getMaintenanceStatus(car, rem.type);
+                    if (s && (s.status === 'overdue') !== (Storage.getReminderStatus(rem, car).status === 'overdue')) clashes++;
+                });
+            });
+            W.Date = realDate;
+            this.eq('schedule and reminders agree on what is overdue, all the way out', clashes, 0);
+        });
+        await T('a postponed reminder', async () => {
+            Storage.addReminder({ carId: 'test-car', type: 'Oil Change', dueDate: day(-40), dueMileage: '120000',
+                completed: false, autoCreated: true, snoozed: true, notes: '' });
+            App.renderPage('reminders');
+            this.eq('a snoozed reminder keeps the date it was pushed to',
+                Storage.getReminders('test-car').find(x => x.type === 'Oil Change').dueDate, day(-40));
+        });
+        await T('replacing an automatic reminder', async () => {
+            Storage.addReminder({ carId: 'test-car', type: 'Battery', dueDate: day(-400), dueMileage: '150000', completed: false, autoCreated: true, notes: '' });
+            App.openServiceModal(null, 'test-car', 'Battery');
+            await tick(60);
+            D.getElementById('f-date').value = day(0);
+            tapSave();
+            this.eq('the app replacing its own reminder leaves nothing in Recently Deleted',
+                Storage.getTrash().filter(t => t.kind === 'reminder').length, 0);
+            this.eq('and there is still exactly one', Storage.getReminders('test-car').filter(r => r.type === 'Battery').length, 1);
+        });
+
+        // -- editing history must not rewrite the present --
+        await T('the oil form', async () => {
+            custom('Oil Change', 7000);
+            App.openServiceModal(null, 'test-car', 'Oil Change');
+            this.eq('a new oil change starts on the interval this car is using',
+                D.querySelector('input[name="oil-interval"]:checked').value, '7000');
+        });
+        await T('editing an old oil record', async () => {
+            custom('Oil Change', 7000);
+            Storage.addService({ carId: 'test-car', type: 'Oil Change', date: day(200), mileage: '80000', cost: '150' });
+            const old = Storage.getServices('test-car').find(s => s.mileage === '80000');
+            App.renderPage('reminders');
+            const before = Recommendations.getMaintenanceStatus(firstCar(), 'Oil Change').detail;
+            App.openServiceModal(old);
+            await tick(60);
+            tapSave();
+            this.eq('saving an old oil record leaves the interval alone',
+                Recommendations.getEffective(firstCar(), 'Oil Change').km, 7000);
+            this.eq('and the schedule alone', Recommendations.getMaintenanceStatus(firstCar(), 'Oil Change').detail, before);
+        });
+        await T('editing an old filter record', async () => {
+            Storage.addService({ carId: 'test-car', type: 'Air Filter', date: day(20), mileage: '98000', cost: '80' });
+            App.renderPage('reminders');
+            Recommendations.createReminderFromService(firstCar(), 'Air Filter', '98000', day(20));
+            const old = Storage.getServices('test-car').find(s => s.id === 's-air');
+            App.openServiceModal(old);
+            await tick(60);
+            tapSave();
+            const r = Storage.getReminders('test-car').find(x => x.type === 'Air Filter' && !x.completed);
+            const st = Recommendations.getMaintenanceStatus(firstCar(), 'Air Filter');
+            this.eq('the reminder still counts from the newest job', r.dueMileage, String(st.nextKm));
+        });
+        await T('editing an old inspection', async () => {
+            Storage.updateCar('test-car', { fahesExpiry: day(-300) });
+            Storage.addService({ carId: 'test-car', type: 'Periodic Inspection', date: day(400), mileage: '', cost: '0' });
+            const old = Storage.getServices('test-car').find(s => s.type === 'Periodic Inspection');
+            App.openServiceModal(old);
+            await tick(60);
+            tapSave();
+            this.eq('saving an old inspection leaves the current certificate alone', firstCar().fahesExpiry, day(-300));
+        });
+        await T('bills on an edited record', async () => {
+            const bills = [
+                { id: 'bl_one', kind: 'Parts', label: '18" rims', vendor: 'A', photoIds: [], amount: '100', warrantyMonths: '', warrantyKm: '', startKm: '', date: day(9) },
+                { id: 'bl_two', kind: 'Parts', label: 'Two', vendor: 'B', photoIds: [], amount: '50', warrantyMonths: '', warrantyKm: '', startKm: '90000', date: day(8) }
+            ];
+            Storage.addService({ carId: 'test-car', type: 'Suspension', date: day(7), mileage: '', cost: '150', bills });
+            App.openServiceModal(Storage.getServices('test-car').find(s => s.type === 'Suspension'));
+            await tick(60);
+            tapSave();
+            const after = Storage.getServices('test-car').find(s => s.type === 'Suspension').bills;
+            this.eq('each bill keeps its own date', after.map(b => b.date), [day(9), day(8)]);
+            this.eq('and its own identity', after.map(b => b.id), ['bl_one', 'bl_two']);
+            this.eq('and its own starting km', after.map(b => b.startKm), ['', '90000']);
+            this.eq('and a quote in its label', after[0].label, '18" rims');
+        });
+        await T('two jobs with no cost', async () => {
+            App.openServiceModal(null, 'test-car', 'Tire Rotation');
+            await tick(60);
+            D.querySelectorAll('.service-chips input[value="Alignment"]').forEach(b => { b.checked = true; });
+            D.getElementById('f-date').value = day(0);
+            tapSave();
+            this.ok('no cost typed stores no cost', !Storage.getServices('test-car').some(s => String(s.cost) === 'NaN'));
+        });
+
+        // -- the car form --
+        await T('typing the km on the car form', async () => {
+            freeze(new realDate(realDate.now() + 16 * 86400000).toISOString());
+            App.openCarModal(firstCar());
+            D.getElementById('f-mileage').value = '102000';
+            tapSave();
+            this.eq('the figure typed is the figure shown', Storage.getEffectiveMileage(firstCar()), 102000);
+            this.ok('and it counts as a reading', Storage.getOdometerLogs('test-car').some(o => o.km === 102000));
+        });
+        await T('free text on forms', async () => {
+            Features.openTireModal('test-car');
+            D.getElementById('f-tire-brand').value = 'Brand "X" <new>';
+            tapSave();
+            Features.openTireModal('test-car');
+            this.eq('a quote survives reopening the form', D.getElementById('f-tire-brand').value, 'Brand "X" <new>');
+        });
+
+        // -- forecast --
+        await T('the six-month forecast', async () => {
+            custom('Oil Change', 7000);
+            Storage.addService({ carId: 'test-car', type: 'Air Filter', date: day(10), mileage: '99000', cost: '100' });
+            const fc = Storage.getCostForecast('all', 6);
+            const of = type => fc.items.find(i => i.type === type);
+            // 15,000 km at 110 km/day lands inside six months, while its 12-month date does not
+            this.ok('a job due by distance is forecast', !!of('Air Filter'), fc.items.map(i => i.type).join(', '));
+            this.ok('and a job done several times is counted several times', of('Oil Change') && of('Oil Change').times >= 2,
+                JSON.stringify(of('Oil Change')));
+        });
+
+        // -- the dashboard --
+        await T('a browser without notifications', async () => {
+            const N = W.Notification;
+            W.Notification = undefined;
+            let threw = null;
+            try { App.renderDashboard(); } catch (e) { threw = e.message; }
+            W.Notification = N;
+            this.eq('the dashboard still draws all the way down', threw, null);
+        });
+        await T('notifications', async () => {
+            const N = W.Notification;
+            W.Notification = { permission: 'granted' };
+            W.localStorage.removeItem('autocare_notified');
+            App.renderPage('reminders');            // the fixture's reminder catches up with the schedule
+            const sent = [];
+            const real = Features._notify;
+            Features._notify = (title, body) => sent.push(body);
+            Features.scheduleNotifications();
+            Features.scheduleNotifications();
+            App.renderDashboard();
+            Features._notify = real;
+            W.Notification = N;
+            W.localStorage.removeItem('autocare_notified');
+            this.ok('a due item notifies', sent.length === 1, JSON.stringify(sent));
+        });
+        await T('the upcoming list', async () => {
+            Storage.addReminder({ carId: 'test-car', type: 'Other', dueDate: day(-300), dueMileage: '100300', completed: false, notes: 'x' });
+            Storage.addReminder({ carId: 'test-car', type: 'Battery', dueDate: day(-20), dueMileage: '', completed: false, notes: 'y' });
+            App.navigate('dashboard');
+            const rows = D.getElementById('upcoming-reminders').innerText;
+            this.ok('a reminder due by km says so', rows.includes('300 km left'), rows.slice(0, 200));
+            this.ok('and sorts by what comes first', rows.indexOf(I18N.t('Other')) < rows.indexOf(I18N.t('Battery')), rows.slice(0, 200));
+        });
+        await T('the health score', async () => {
+            Storage.updateReminder('r-air', { dueDate: day(10) });
+            const withRem = Storage.getCarHealthScore(firstCar()).score;
+            const all = Storage.getAll();
+            all.reminders = [];
+            Storage.save(all);
+            this.eq('one overdue job is not counted twice', withRem, Storage.getCarHealthScore(firstCar()).score);
+        });
+        await T('the expense pie', async () => {
+            Storage.addService({ carId: 'test-car', type: 'Brake Inspection', date: day(5), mileage: '', cost: '' });
+            App.navigate('dashboard');
+            const zero = [...D.querySelectorAll('.pie-val')].filter(e => e.textContent.startsWith('0 SAR'));
+            this.eq('nothing free takes a row in the cost breakdown', zero.length, 0);
+        });
+
+        // -- speed --
+        await T('reading the database', async () => {
+            const parse = W.JSON.parse;
+            let n = 0;
+            W.JSON.parse = function (...a) { n++; return parse.apply(this, a); };
+            App.navigate('dashboard');
+            App.navigate('dashboard');
+            W.JSON.parse = parse;
+            this.ok('drawing the dashboard does not re-read everything hundreds of times', n < 60, n + ' parses over 2 renders');
+            const copy = Storage.getAll();
+            copy.cars[0].make = 'changed';
+            this.eq('changing a read copy cannot leak back', firstCar().make, 'Ford');
+            const list = Storage.getServices('all');
+            list.reverse();
+            this.ok('nor can reordering one', Storage.getServices('all')[0].id !== list[0].id || list.length < 2);
+            ['dashboard', 'cars', 'services', 'fuel', 'expenses', 'warranty', 'reminders'].forEach(p => App.navigate(p));
+            App.openServiceModal(Storage.getServices('all')[0]);
+            await tick(60);
+            App.closeModal();
+            this.eq('drawing every screen writes nothing to the shared copy',
+                JSON.stringify(Storage._read().cars) + JSON.stringify(Storage._read().services) + JSON.stringify(Storage._read().reminders),
+                JSON.stringify(Storage.getAll().cars) + JSON.stringify(Storage.getAll().services) + JSON.stringify(Storage.getAll().reminders));
+            const raw = JSON.parse(W.localStorage.getItem('autocare_data'));
+            raw.cars[0].make = 'Direct';
+            W.localStorage.setItem('autocare_data', JSON.stringify(raw));
+            this.eq('a write from elsewhere is seen straight away', firstCar().make, 'Direct');
+        });
+
+        // -- Arabic --
+        await T('automatic reminders in Arabic', async () => {
+            I18N.set('ar'); I18N.translateDOM();
+            App.navigate('reminders');
+            const text = D.getElementById('reminders-list').innerText;
+            this.ok('an automatic reminder note is translated', !/Auto:|or at/.test(text), text.slice(0, 200));
+            I18N.set('en'); I18N.translateDOM();
+        });
     },
 
     _paint(final) {

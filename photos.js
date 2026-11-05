@@ -112,7 +112,7 @@ const Photos = {
         if (Array.isArray(idOrList)) ids = idOrList.filter(Boolean);
         else if (idOrList && typeof idOrList === 'object') ids = this.idsFor(idOrList);
         else ids = idOrList ? [idOrList] : [];
-        if (!ids.length) { alert('No receipt photo attached.'); return; }
+        if (!ids.length) { alert(t('No receipt photo attached.')); return; }
         this._set = ids;
         this._idx = Math.min(Math.max(0, startAt || 0), ids.length - 1);
         this._load();
@@ -122,7 +122,7 @@ const Photos = {
         const id = this._set[this._idx];
         this.get(id)
             .then(dataUrl => {
-                if (!dataUrl) { alert('That receipt photo is no longer stored.'); return; }
+                if (!dataUrl) { alert(t('That receipt photo is no longer stored.')); return; }
                 // Grab the blob up front so Save can call share() straight from the tap,
                 // without an await in between that would break the user-gesture chain.
                 return fetch(dataUrl)
@@ -130,7 +130,7 @@ const Photos = {
                     .then(blob => { this._current = { id, dataUrl, blob }; this._showOverlay(dataUrl); })
                     .catch(() => { this._current = { id, dataUrl, blob: null }; this._showOverlay(dataUrl); });
             })
-            .catch(() => alert('Could not load that receipt photo.'));
+            .catch(() => alert(t('Could not load that receipt photo.')));
     },
 
     step(delta) {
@@ -149,13 +149,13 @@ const Photos = {
         el.className = 'photo-viewer';
         el.innerHTML =
             '<div class="pv-bar">' +
-                '<button type="button" class="pv-btn" onclick="Photos.closeViewer()">Close</button>' +
+                '<button type="button" class="pv-btn" onclick="Photos.closeViewer()">' + t('Close') + '</button>' +
                 (this._set.length > 1
                     ? '<button type="button" class="pv-btn" onclick="Photos.step(-1)">‹</button>' +
                       '<span class="pv-hint">' + (this._idx + 1) + ' / ' + this._set.length + '</span>' +
                       '<button type="button" class="pv-btn" onclick="Photos.step(1)">›</button>'
-                    : '<span class="pv-hint">Press and hold the image to save it</span>') +
-                '<button type="button" class="pv-btn pv-primary" onclick="Photos.saveImage()">Save</button>' +
+                    : '<span class="pv-hint">' + t('Press and hold the image to save it') + '</span>') +
+                '<button type="button" class="pv-btn pv-primary" onclick="Photos.saveImage()">' + t('Save') + '</button>' +
             '</div>' +
             '<div class="pv-body"><img src="' + dataUrl + '" alt="Receipt"></div>';
         el.style.display = 'flex';

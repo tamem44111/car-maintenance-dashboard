@@ -20,6 +20,7 @@ Bilingual (EN/AR) offline-first PWA for tracking car maintenance, built for Saud
 | `app.js` | Routing, rendering, all modals |
 | `sw.js` | Service worker. **Bump `CACHE` on every deploy** |
 | `checks.html` / `checks.js` | The verification suite. Open and press Run |
+| `sw.check.js` | The service worker's fetch handling, against a fake network. `node sw.check.js` |
 
 Data lives in `localStorage` (`autocare_data`) except receipt photos, which are in IndexedDB.
 
@@ -49,6 +50,43 @@ totals, cost per km, the monthly bars, average-cost estimates and keep-or-sell. 
 would otherwise distort all of those for years. `insurancePaid` (only offered alongside
 `accident`) makes `getOwnCost` 0 while `getServiceCost` keeps the bills' value as the
 repair's worth. The Expenses page names the accident total on its own line, outside the totals.
+
+**Automatic reminders are a view of the schedule.** `Recommendations.syncAutoReminders` runs on
+every render and makes each automatic reminder match `getMaintenanceStatus`, so a change to a
+record, an interval or the climate setting can't leave the two disagreeing. They used to keep
+their own copy of the dates: the oil reminder froze a km estimate as a calendar deadline and
+called itself overdue with 551 km left. `dueDate` is the time limit and `dueMileage` the km
+limit; neither is an estimate. Only a reminder the owner pushed back (`snoozed`) is left alone.
+Notes on these reminders are composed at display time by `Features.reminderNote`.
+
+**Only the newest record speaks for the car.** `Recommendations.isNewest` guards everything a
+record writes beyond itself: the oil interval, the next-due reminder, the Fahes date. Saving an
+old oil record from August used to put the car back on 5,000 km with a reminder already overdue.
+
+**New tyres restart the rotation clock.** `getMaintenanceStatus` counts a `Tires` record as a
+fresh start for `Tire Rotation`. A record with no km has nothing to count down from, so it runs
+on the calendar alone. Which limit "binds" is whichever arrives first, not which has the
+smaller fraction left; those tie right after a service.
+
+**Days are the owner's days.** Use `Storage.today()` and `Storage.dateStr()`, never
+`toISOString()` on a `new Date()`. That is UTC, which in Saudi Arabia is still yesterday until
+3 AM, and which put "last month" a month too far back. Date *strings* read back with
+`new Date('2026-09-29')` are UTC midnight, 03:00 here, so arithmetic on those is safe.
+
+**Reads and writes take different paths.** `Storage._read()` is a shared parse, compared against
+the stored text so a write from anywhere is still seen; one dashboard used to parse the whole
+database 595 times. Getters hand back their own arrays but share the rows, so **a row from a
+getter must never be written to**. Anything that changes data uses `getAll()`, changes its
+private copy, then `save()`. `checks.js` verifies that drawing every screen leaves the shared
+copy untouched.
+
+**Importing never uses a system prompt.** `confirm()` made Cancel mean "replace everything".
+`_showImportChoice` asks in the app, says when the file is older than the phone, and closes the
+Settings form it ran from, because that stale form saved back over the import and wiped the
+fuel setting. Adding (`merge`) never overrides what the phone already has.
+
+**A weak signal must not hold the app up.** `sw.js` is network-first with a 2.5-second limit
+before it serves the saved copy; the slow download still refreshes the cache for next time.
 
 **Nothing may be dated in the future.** `logOdometer` refuses a future reading and
 `addService` pulls a future service date back to today, because either one silently
@@ -158,7 +196,7 @@ printing uses a hidden iframe.
 
 ## Verification procedure
 
-**Open `checks.html` and press Run.** ~170 checks, a few seconds. It drives the real app
+**Open `checks.html` and press Run.** ~350 checks, a few seconds. It drives the real app
 inside a 402px iframe, so the render and overflow checks see what an iPhone sees.
 
 What it covers:
@@ -190,31 +228,19 @@ apply — this has burned a session as recently as August 2026. Serve on a fresh
 
 ## Open items
 
-**Verified in the code, August 2026 — none of these are fixed:**
-
-- **A note-only record still resets a schedule.** The 2025-08-17 Transmission entry (no
-  cost, note "Need to replace after 60000") is counted as a completed fluid change. The
-  owner acts on this app, so this one matters most.
-- **Untranslated in Arabic:** `or at` and `confirm('Delete?')` in the reminder card,
-  `Still covered` / `Active` in the Warranty Center, and the service-insight sentence on
-  Expenses. Also **auto-generated reminder notes** ("Auto: next Air Filter at 437,881 km"),
-  which are stored as English *data* — `t()` can never match them because the numbers are
-  baked in. Fixing that means storing the parts and composing at display time.
-- **The schedule data is wrong, and now verifiably so.** See "Verified Ford intervals"
-  below. Left in place deliberately until the rebuild; the owner is aware and knows which
-  warnings to ignore.
+**The schedule data is wrong, and verifiably so.** See "Verified Ford intervals" below. Left in
+place by the owner's decision until the rebuild; he knows which warnings to ignore.
 
 **The owner's own data:**
 
-- Spark plugs ~600 km overdue and growing at 105 km/day.
 - Odometer inconsistency: Coolant Flush logged 2026-05-01 at 410,800 km, Air Filter
-  2026-04-12 at 414,521 km. One is mistyped. The service modal has no backwards-reading
-  guard — only the odometer modal does.
+  2026-04-12 at 414,521 km. One is mistyped. If it is the coolant, the next one is due later
+  than the app says.
 - A second, smaller instance: a service on 2026-08-18 reads 428,641 km, a manual reading
   on 2026-08-19 reads 428,640.
-- Tyre DOT date not set, and no tyre fitting record, so wear and age tracking are idle.
-- Fuel logging unused after a year. Cost-per-km now uses an estimate instead (11 L/100km
-  at 2.33 SAR), but the tank-by-tank page and the consumption anomaly warning stay dormant.
+- The new tyres have no DOT date, so their age isn't tracked.
+- Fuel logging unused. Cost-per-km uses an estimate instead (11.6 L/100km at 2.33 SAR), but
+  the tank-by-tank page and the consumption anomaly warning stay dormant.
 
 ## Verified Ford intervals — 2013 Taurus
 
