@@ -683,8 +683,19 @@ const Checks = {
     },
 
     // ═══════════════ runner ═══════════════
+    _load(iframe, src) {
+        return new Promise(resolve => {
+            iframe.addEventListener('load', () => setTimeout(resolve, 80), { once: true });
+            iframe.src = src;
+        });
+    },
+
     async run(iframe, logEl) {
         this.failures = []; this.warnings = []; this.passes = []; this._log = logEl;
+        // A run that was cut short can leave the frame on the preview page
+        let onApp = false;
+        try { onApp = iframe.contentWindow.eval('typeof App') === 'object'; } catch (e) {}
+        if (!onApp) await this._load(iframe, 'index.html');
         const W = iframe.contentWindow;
         const D = W.document;
 
@@ -709,15 +720,94 @@ const Checks = {
             await this.render(A);
             this.seed(W);
             await this.regressions(A);
+            await this.preview(iframe);
         } catch (e) {
             this.failures.push({ name: 'the run itself threw', detail: e.message + '\n' + (e.stack || '').split('\n')[1] });
         } finally {
             W.alert = realAlert; W.confirm = realConfirm;
-            W.localStorage.clear();
-            Object.keys(snapshot).forEach(k => W.localStorage.setItem(k, snapshot[k]));
+            // Through this page's own storage, not the frame's: the preview page
+            // switches its writes off, and a restore sent through it would do nothing.
+            window.localStorage.clear();
+            Object.keys(snapshot).forEach(k => window.localStorage.setItem(k, snapshot[k]));
             this._paint(true);
         }
         return { passed: this.passes.length, failed: this.failures.length, warned: this.warnings.length };
+    },
+
+    // The new design, previewed beside the current app (next/). It reads the same
+    // records through the same code, so it must show the same numbers in both
+    // languages, and it must be unable to change a single one of them.
+    async preview(iframe) {
+        const store = window.localStorage;
+        const dump = () => JSON.stringify(Object.keys(store).sort().map(k => [k, store.getItem(k)]));
+        const open = async lang => {
+            store.setItem('autocare_lang', lang);
+            await this._load(iframe, 'next/index.html?t=' + Date.now());
+            return iframe.contentWindow;
+        };
+        const wide = (W, root) => {
+            const out = [];
+            root.querySelectorAll('*').forEach(el => {
+                const r = el.getBoundingClientRect();
+                if (r.width > 0 && (r.right > W.innerWidth + 1 || r.left < -1))
+                    out.push(el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : ''));
+            });
+            return out;
+        };
+        try {
+            this.seed(window);
+            let W = await open('en'), D = W.document;
+            const before = dump();
+            const app = D.getElementById('app');
+            this.ok('[preview] the page draws', app.querySelectorAll('.card').length >= 2, app.innerText.slice(0, 120));
+            this.ok('[preview] it shows the odometer the app shows', app.innerText.includes('100,000'), app.innerText.slice(0, 80));
+            const first = D.querySelector('.row');
+            this.ok('[preview] the overdue air filter leads the list',
+                !!first && first.classList.contains('overdue') && /Air filter/.test(first.textContent), first && first.textContent);
+            this.ok('[preview] and is marked on the road', !!D.querySelector('.track .mark.overdue'));
+            const road = D.querySelector('.track').getBoundingClientRect();
+            this.ok('[preview] every marker sits on the road', [...D.querySelectorAll('.track .mark')].every(m => {
+                const r = m.getBoundingClientRect();
+                return r.left >= road.left - 1 && r.right <= road.right + 9;
+            }));
+            // a job due by date sits on the road at an estimated distance, and must say so
+            const estimated = W.eval(`(() => {
+                const car = Storage.getCars()[0];
+                Storage.save = () => {};
+                const v = Next.visits([{ type: 'Rear Brake Pads', status: 'ok', days: 81, km: 10036, kmFirst: false, kmLeft: 56000, daysLeft: 81 }]);
+                return Next.roadHTML(v);
+            })()`);
+            this.ok('[preview] a distance worked out from a date says "about"', /about 10,000 km/.test(estimated), estimated.replace(/<[^>]+>/g, ' ').trim().slice(0, 80));
+            this.eq('[preview] no overflow at 402px', wide(W, D.body), []);
+            this.eq('[preview] no raw template literals', app.innerText.match(/\$\{[^}]*\}/g) || [], []);
+            this.eq('[preview] the way back leads to the current app', D.querySelector('a.round').getAttribute('href'), '../');
+
+            // press everything, then try to write directly
+            D.querySelectorAll('button').forEach(b => b.click());
+            W.localStorage.setItem('autocare_probe', '1');
+            W.localStorage.removeItem('autocare_data');
+            W.eval("Storage.addService({ carId: 'test-car', type: 'Battery', date: '2026-01-01', cost: '1' })");
+            this.eq('[preview] nothing it does can change the records', dump(), before);
+            this.ok('[preview] a tap says it is a preview', D.getElementById('toast').textContent.length > 0);
+
+            W = await open('ar'); D = W.document;
+            this.eq('[preview] Arabic mirrors the page', D.documentElement.getAttribute('dir'), 'rtl');
+            const gaps = [];
+            const walk = D.createTreeWalker(D.body, W.NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walk.nextNode())) {
+                const txt = n.textContent.trim();
+                if (!txt || /[؀-ۿ]/.test(txt) || /^[~\d\s.,:%+\-\/()·—–×]*$|Ford|Taurus/.test(txt)) continue;
+                if (n.parentElement && /SCRIPT|STYLE/.test(n.parentElement.tagName)) continue;
+                gaps.push(txt.slice(0, 40));
+            }
+            this.eq('[preview] nothing is left in English', gaps, []);
+            this.eq('[preview] no overflow at 402px in Arabic', wide(W, D.body), []);
+        } catch (e) {
+            this.failures.push({ name: 'the preview checks threw', detail: e.message });
+        }
+        store.setItem('autocare_lang', 'en');
+        await this._load(iframe, 'index.html');
     },
 
     // Everything here was found by running the owner's real backup through the app
@@ -1068,6 +1158,12 @@ const Checks = {
             App.navigate('dashboard');
             const zero = [...D.querySelectorAll('.pie-val')].filter(e => e.textContent.startsWith('0 SAR'));
             this.eq('nothing free takes a row in the cost breakdown', zero.length, 0);
+        });
+
+        await T('the way in to the new design', async () => {
+            App.navigate('dashboard');
+            const link = D.querySelector('#page-dashboard .next-banner');
+            this.eq('the dashboard links to the preview', link && link.getAttribute('href'), 'next/');
         });
 
         // -- speed --

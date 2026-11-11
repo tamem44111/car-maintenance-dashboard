@@ -21,6 +21,7 @@ Bilingual (EN/AR) offline-first PWA for tracking car maintenance, built for Saud
 | `sw.js` | Service worker. **Bump `CACHE` on every deploy** |
 | `checks.html` / `checks.js` | The verification suite. Open and press Run |
 | `sw.check.js` | The service worker's fetch handling, against a fake network. `node sw.check.js` |
+| `next/` | The new design ("Clean iPhone"), as a read-only preview beside the current app |
 
 Data lives in `localStorage` (`autocare_data`) except receipt photos, which are in IndexedDB.
 
@@ -87,6 +88,22 @@ fuel setting. Adding (`merge`) never overrides what the phone already has.
 
 **A weak signal must not hold the app up.** `sw.js` is network-first with a 2.5-second limit
 before it serves the saved copy; the slow download still refreshes the cache for next time.
+
+**The redesign is being built beside the app, not inside it.** `next/` is the new design,
+reached from a link at the top of the dashboard. It loads the same `storage.js`,
+`recommendations.js` and `features.js`, so it cannot show a different number from the app,
+and it switches off `localStorage` writes for its own page before anything else runs, so it
+cannot change a record whatever its code does. The link has to live inside the current app:
+on iPhone an installed app's data is separate from Safari's, so the same address opened in
+Safari would be empty. The measured reasons for the redesign: Home was about four screens of
+eight equal blocks, there were seven tabs, 29 records took nine screens, and the add-service
+form had 39 fields. The agreed structure is a one-screen Home with a "road ahead" strip,
+history grouped by visit, four tabs, and logging in steps. Screens move over one at a time;
+when the last one is done, `next/` replaces the app and the link goes.
+
+On the road strip, a job due by date has no km limit. Its place is an estimate at the car's
+driving rate, so it is rounded and labelled "about". Jobs within 2,000 km of each other
+share a marker, because they are one trip to the workshop.
 
 **Nothing may be dated in the future.** `logOdometer` refuses a future reading and
 `addService` pulls a future service date back to today, because either one silently

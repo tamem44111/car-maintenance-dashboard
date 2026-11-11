@@ -2257,5 +2257,13 @@ tr:hover td { background: var(--card-hover); }
 .imp-choices .btn { width: 100%; justify-content: center; min-height: 46px; }
 .imp-choices .field-note { margin-bottom: 10px; }
 
+/* The way in to the new design while it is being built. One quiet row; it goes
+   when the new design takes over. */
+.next-banner { display: flex; justify-content: space-between; align-items: center; gap: 12px;
+               margin-bottom: 12px; padding: 12px 16px; border-radius: 14px; text-decoration: none;
+               background: var(--nd-surface, var(--card)); border: 1px solid var(--nd-rule, var(--border));
+               color: var(--text2); font-size: 14px; }
+.next-banner b { color: var(--primary, var(--blue)); font-weight: 600; white-space: nowrap; }
+
 .cost-cell { display: inline-block; }
 .svc-tags { display: inline-flex; flex-wrap: wrap; gap: 4px; justify-content: flex-end; }
