@@ -690,6 +690,27 @@ const Checks = {
         });
     },
 
+    async _photoSnapshot(Photos) {
+        const out = {};
+        try { for (const id of await Photos.keys()) out[id] = await Photos.get(id); } catch (e) {}
+        return out;
+    },
+
+    // Puts back any photo that is gone, and names it so the loss is not silent
+    async _photoRestore(iframe, before) {
+        const lost = [];
+        try {
+            const Photos = iframe.contentWindow.eval('Photos');
+            // the app removes unused photos a moment after the save that orphaned them
+            await new Promise(r => setTimeout(r, 300));
+            const now = new Set(await Photos.keys());
+            for (const id of Object.keys(before)) {
+                if (!now.has(id)) { lost.push(id); await Photos.put(id, before[id]); }
+            }
+        } catch (e) { lost.push('could not check the photo store: ' + e.message); }
+        return lost;
+    },
+
     async run(iframe, logEl) {
         this.failures = []; this.warnings = []; this.passes = []; this._log = logEl;
         // A run that was cut short can leave the frame on the preview page
@@ -707,12 +728,18 @@ const Checks = {
             snapshot[k] = W.localStorage.getItem(k);
         }
         const realAlert = W.alert, realConfirm = W.confirm;
+        // Receipt photos are kept outside localStorage, so the snapshot above does not
+        // hold them. They are the owner's only copy of his bills.
+        const photos = await this._photoSnapshot(W.eval('Photos'));
 
         try {
             W.alert = () => {}; W.confirm = () => true;
             // const-declared modules are not on window; eval sees the global lexical scope
             W.eval('window.__modules = {Storage, Recommendations, Features, App, I18N, Photos};');
             const A = { ...W.__modules, W, D };
+            // The app tidies away any photo no bill points to. With the fixture loaded
+            // that is every receipt the owner has, so tidying is off while tests run.
+            A.Photos.remove = () => Promise.resolve();
 
             this.seed(W);
             await this.logic(A);
@@ -729,6 +756,8 @@ const Checks = {
             // switches its writes off, and a restore sent through it would do nothing.
             window.localStorage.clear();
             Object.keys(snapshot).forEach(k => window.localStorage.setItem(k, snapshot[k]));
+            const lost = await this._photoRestore(iframe, photos);
+            if (lost.length) this.failures.push({ name: 'the run removed receipt photos (they have been put back)', detail: lost.join(', ') });
             this._paint(true);
         }
         return { passed: this.passes.length, failed: this.failures.length, warned: this.warnings.length };
@@ -748,6 +777,8 @@ const Checks = {
         const wide = (W, root) => {
             const out = [];
             root.querySelectorAll('*').forEach(el => {
+                // the row of job chips scrolls sideways on purpose; the page must not
+                if (el.closest('.chips')) return;
                 const r = el.getBoundingClientRect();
                 if (r.width > 0 && (r.right > W.innerWidth + 1 || r.left < -1))
                     out.push(el.tagName.toLowerCase() + (el.className ? '.' + String(el.className).split(' ')[0] : ''));
@@ -790,18 +821,94 @@ const Checks = {
             this.eq('[preview] nothing it does can change the records', dump(), before);
             this.ok('[preview] a tap says it is a preview', D.getElementById('toast').textContent.length > 0);
 
+            // ── History: the same records as a logbook, one row per trip to the workshop ──
+            // Two jobs on one day, a check where nothing was replaced, and an accident
+            // repair paid by insurance whose two bills share one photographed invoice.
+            const data = JSON.parse(store.getItem('autocare_data'));
+            data.services.push(
+                { id: 'h-brk', carId: 'test-car', type: 'Brake Inspection', date: this.localDay(30), mileage: '96700', cost: '' },
+                { id: 'h-pad', carId: 'test-car', type: 'Front Brake Pads', date: this.localDay(60), mileage: '94000', cost: '', checkOnly: true, padThickness: '8' },
+                { id: 'h-acc', carId: 'test-car', type: 'Suspension', date: this.localDay(20), cost: '', accident: true, insurancePaid: true,
+                    notes: 'Front struts, both sides',
+                    bills: [{ id: 'b1', kind: 'Parts', label: 'Struts', vendor: 'Shop', amount: '900', photoIds: ['ph-x'] },
+                        { id: 'b2', kind: 'Labour', label: 'Fitting', amount: '100.25', photoIds: ['ph-x'] }] });
+            store.setItem('autocare_data', JSON.stringify(data));
+            const openHistory = async lang => {
+                store.setItem('autocare_lang', lang);
+                await this._load(iframe, 'next/index.html?t=' + Date.now() + '#history');
+                return iframe.contentWindow;
+            };
+            const rows = () => [...D.querySelectorAll('.visit')];
+            const rowFor = day => D.querySelector(`.visit[data-visit="${this.localDay(day)}"]`);
+            const sheet = () => D.querySelector('.sheet');
+            const digits = el => parseInt((el ? el.textContent : '').replace(/[^\d]/g, ''), 10) || 0;
+            const yearTotals = () => [...D.querySelectorAll('.year h2 span + span')].reduce((n, el) => n + digits(el), 0);
+            // anything left in English, apart from what the owner typed himself
+            const english = () => {
+                const gaps = [];
+                const walk = D.createTreeWalker(D.body, W.NodeFilter.SHOW_TEXT);
+                let n;
+                while ((n = walk.nextNode())) {
+                    const txt = n.textContent.trim();
+                    if (!txt || /[؀-ۿ]/.test(txt) || /^[~\d\s.,:%+\-\/()·—–×]*$|Ford|Taurus/.test(txt)) continue;
+                    if (n.parentElement && (/SCRIPT|STYLE/.test(n.parentElement.tagName) || n.parentElement.closest('[dir="auto"]'))) continue;
+                    gaps.push(txt.slice(0, 40));
+                }
+                return gaps;
+            };
+
+            W = await openHistory('en'); D = W.document;
+            const logbook = dump();
+            this.eq('[preview] History has one row for each day of work', rows().length, 4);
+            this.ok('[preview] jobs done on the same day are one visit', /Oil change and brake check/.test(rowFor(30).textContent), rowFor(30).textContent);
+            this.eq('[preview] the year totals are what the owner paid', yearTotals(), 320);
+            const acc = rowFor(20);
+            this.ok('[preview] insurance money is shown, not counted',
+                /insurance paid 1,000 SAR/.test(acc.textContent) && !acc.querySelector('.cost'), acc.textContent);
+            this.ok('[preview] a photo on two bills is one receipt', /1 receipt(?!s)/.test(acc.textContent), acc.textContent);
+            this.ok('[preview] a check says nothing was replaced', /checked only/.test(rowFor(60).textContent), rowFor(60).textContent);
+
+            D.querySelector('.chip[data-filter="Oil Change"]').click();
+            this.eq('[preview] picking a job narrows the list to it', rows().map(r => r.querySelector('strong').textContent), ['Oil change']);
+            this.eq('[preview] and totals that job alone', yearTotals(), 200);
+            D.querySelector('.chip[data-filter=""]').click();
+            this.eq('[preview] All brings every visit back', rows().length, 4);
+
+            rowFor(30).click();
+            this.eq('[preview] a visit opens with every job in it', sheet() ? sheet().querySelectorAll('.job').length : 0, 2);
+            this.eq('[preview] no overflow in an open visit', wide(W, D.getElementById('sheet')), []);
+            D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape' }));
+            this.ok('[preview] Escape closes it', !sheet());
+            rowFor(20).click();
+            const sums = sheet().querySelector('.sums').textContent.replace(/\s+/g, ' ');
+            this.ok('[preview] an insured repair shows who paid what',
+                /Insurance paid\s*1,000\.25 SAR/.test(sums) && /You paid\s*0 SAR/.test(sums), sums);
+            this.eq('[preview] and shows its receipt once', sheet().querySelectorAll('.thumb').length, 1);
+            D.querySelectorAll('#sheet button').forEach(b => b.click());
+            W.eval('Next.closePhoto(); Next.closeSheet();');
+            this.eq('[preview] no overflow in History', wide(W, D.body), []);
+            this.ok('[preview] the chips scroll inside their row, not the page',
+                D.documentElement.scrollWidth <= W.innerWidth + 1 && D.querySelector('.chips').scrollWidth > 0,
+                D.documentElement.scrollWidth + ' > ' + W.innerWidth);
+            D.querySelectorAll('button').forEach(b => b.click());
+            this.eq('[preview] History cannot change the records either', dump(), logbook);
+            const stored = await W.eval("Photos.put('ph-probe', 'data:,x').then(() => Photos.remove('ph-x')).then(() => Photos.keys())");
+            this.ok('[preview] nor can it add or remove a receipt photo', !stored.includes('ph-probe'), stored.join(', '));
+
+            W = await openHistory('ar'); D = W.document;
+            this.ok('[preview] Arabic counts take the right form of the noun',
+                /4 زيارات/.test(D.querySelector('.lede').textContent) && /فاتورة واحدة/.test(rowFor(20).textContent),
+                D.querySelector('.lede').textContent + ' / ' + rowFor(20).textContent);
+            rowFor(20).click();
+            this.eq('[preview] History leaves nothing in English', english(), []);
+            this.eq('[preview] no overflow in History in Arabic', wide(W, D.body), []);
+            this.ok('[preview] nor does the page scroll sideways in Arabic', D.documentElement.scrollWidth <= W.innerWidth + 1,
+                D.documentElement.scrollWidth + ' > ' + W.innerWidth);
+            W.eval('Next.closeSheet();');
+
             W = await open('ar'); D = W.document;
             this.eq('[preview] Arabic mirrors the page', D.documentElement.getAttribute('dir'), 'rtl');
-            const gaps = [];
-            const walk = D.createTreeWalker(D.body, W.NodeFilter.SHOW_TEXT);
-            let n;
-            while ((n = walk.nextNode())) {
-                const txt = n.textContent.trim();
-                if (!txt || /[؀-ۿ]/.test(txt) || /^[~\d\s.,:%+\-\/()·—–×]*$|Ford|Taurus/.test(txt)) continue;
-                if (n.parentElement && /SCRIPT|STYLE/.test(n.parentElement.tagName)) continue;
-                gaps.push(txt.slice(0, 40));
-            }
-            this.eq('[preview] nothing is left in English', gaps, []);
+            this.eq('[preview] nothing is left in English', english(), []);
             this.eq('[preview] no overflow at 402px in Arabic', wide(W, D.body), []);
         } catch (e) {
             this.failures.push({ name: 'the preview checks threw', detail: e.message });

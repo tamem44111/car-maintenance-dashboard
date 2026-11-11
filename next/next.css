@@ -21,6 +21,10 @@
     --green: #1F8A3B;
     --bar: rgba(255, 255, 255, .78);
     --plus-shadow: rgba(10, 102, 216, .35);
+    /* a sheet sits above the page: same grey in daylight, one step lighter at night */
+    --sheet: #F2F2F7;
+    --sheet-card: #FFFFFF;
+    --sheet-line: #E3E3E8;
     --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
 }
 
@@ -38,6 +42,9 @@
         --green: #30D158;
         --bar: rgba(40, 40, 43, .78);
         --plus-shadow: rgba(77, 162, 255, .28);
+        --sheet: #1C1C1E;
+        --sheet-card: #2C2C2E;
+        --sheet-line: #3D3D41;
     }
 }
 
@@ -127,6 +134,82 @@ svg.ic { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-wid
 .tile strong.soon { color: var(--amber); }
 .tile strong.overdue { color: var(--red); }
 
+/* ── History ──
+   The logbook: one row per trip to the workshop, newest first, a year at a time. */
+.title { font-size: 32px; line-height: 1.1; font-weight: 700; letter-spacing: -0.02em; }
+.lede { margin-top: 6px; font-size: 15px; color: var(--dim); }
+
+.chips { display: flex; gap: 8px; margin: 14px -18px 0; padding: 2px 18px; overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.chips::-webkit-scrollbar { display: none; }
+.chip { flex: none; font-size: 15px; font-weight: 500; padding: 7px 14px; border-radius: 999px; background: var(--card); white-space: nowrap; }
+.chip[aria-pressed="true"] { background: var(--ink); color: var(--bg); font-weight: 600; }
+
+.year > h2 { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; margin-top: 24px; padding: 0 16px; font-size: 20px; font-weight: 700; letter-spacing: -0.01em; }
+.year > h2 span + span { font: 600 15px/1 var(--rounded); color: var(--dim); font-variant-numeric: tabular-nums; letter-spacing: 0; }
+.year > h2 small, .cost small, .amt small, .sum small { font-size: .82em; font-weight: 500; color: var(--dim); }
+.year > .card { margin-top: 8px; }
+
+.visit { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 13px 16px; }
+.visit + .visit { border-top: 1px solid var(--line); margin-inline-start: 72px; padding-inline-start: 0; width: calc(100% - 72px); }
+.visit .when { flex: none; width: 44px; text-align: center; font-size: 12.5px; line-height: 1.2; color: var(--dim); }
+/* the date column lives in the row's own padding, so the rule above can start after it */
+.visit + .visit .when { margin-inline-start: -56px; }
+.visit .when b { display: block; font: 700 22px/1.05 var(--rounded); color: var(--ink); font-variant-numeric: tabular-nums; }
+.visit .what { flex: 1; min-width: 0; }
+.visit .what strong { display: block; font-size: 16.5px; line-height: 1.25; font-weight: 600; letter-spacing: -0.01em; }
+.visit .what strong + span { display: block; margin-top: 2px; font-size: 14px; line-height: 1.3; color: var(--dim); }
+.visit .cost { flex: none; font: 600 16px/1.25 var(--rounded); font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* ── A visit, opened ── */
+body.locked { overflow: hidden; }
+#sheet { position: fixed; inset: 0; z-index: 20; display: none; }
+#sheet.open { display: block; }
+.scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .42); animation: fade .2s ease; }
+.sheet { --card: var(--sheet-card); --line: var(--sheet-line); position: absolute; inset-inline: 0; bottom: 0; max-width: 480px; margin: 0 auto; max-height: calc(100% - env(safe-area-inset-top, 0px) - 44px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--sheet); border-radius: 26px 26px 0 0; padding: 0 18px calc(env(safe-area-inset-bottom, 0px) + 22px); animation: rise .28s cubic-bezier(.2, .8, .2, 1); }
+.sheet-head { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; background: var(--sheet); padding: 20px 0 6px; }
+.sheet-head h2 { font-size: 22px; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
+.sheet-head p { margin-top: 2px; font-size: 15px; color: var(--dim); }
+.sheet .card { margin-top: 10px; }
+
+.job { padding: 14px 16px; }
+.job + .job { border-top: 1px solid var(--line); margin-inline-start: 16px; padding-inline-start: 0; }
+.job-top { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+.job-top strong { font-size: 16.5px; font-weight: 600; letter-spacing: -0.01em; }
+.amt { flex: none; font: 600 16px/1.25 var(--rounded); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.tags { margin-top: 2px; font-size: 14px; color: var(--dim); }
+.job-note { margin-top: 6px; font-size: 15px; line-height: 1.4; overflow-wrap: anywhere; }
+.bills { list-style: none; padding: 0; margin-top: 8px; }
+.bills li { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 6px 0; font-size: 14.5px; line-height: 1.3; }
+.bills li > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.bills li > span:first-child small { display: block; font-size: 13px; color: var(--dim); }
+.bills .amt { font-size: 14.5px; font-weight: 500; }
+.thumbs { display: flex; flex-wrap: wrap; gap: 10px; padding: 10px 16px 16px; }
+.thumb { width: 72px; height: 72px; border-radius: 12px; overflow: hidden; background: var(--line); flex: none; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.thumb img:not([src]) { visibility: hidden; }
+.thumb.missing { opacity: .45; }
+
+.sum { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; padding: 13px 16px; font-size: 16px; }
+.sum + .sum { border-top: 1px solid var(--line); margin-inline-start: 16px; padding-inline-start: 0; }
+.sum strong { font: 700 17px/1.25 var(--rounded); font-variant-numeric: tabular-nums; }
+.quiet { display: block; width: 100%; margin-top: 14px; padding: 13px; border-radius: 16px; background: var(--card); color: var(--accent); font-size: 16px; font-weight: 600; text-align: center; }
+
+/* ── A receipt, full screen ── */
+#viewer { position: fixed; inset: 0; z-index: 30; display: none; background: #000; }
+#viewer.open { display: grid; place-items: center; }
+#viewer-img { max-width: 100%; max-height: 100%; object-fit: contain; }
+#viewer-img:not([src]) { visibility: hidden; }
+.viewer-bar { position: absolute; inset-inline: 0; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: center; padding: calc(env(safe-area-inset-top, 0px) + 12px) 16px 12px; color: #FFF; font: 600 15px/1 var(--rounded); font-variant-numeric: tabular-nums; }
+#viewer .round { background: rgba(60, 60, 64, .78); color: #FFF; }
+#viewer .step { position: absolute; top: 50%; margin-top: -22px; width: 44px; height: 44px; }
+#viewer .step.prev { inset-inline-start: 10px; }
+#viewer .step.next { inset-inline-end: 10px; }
+svg.back { transform: scaleX(-1); }
+[dir="rtl"] svg.flip.back { transform: none; }
+
+@keyframes rise { from { transform: translateY(100%); } }
+@keyframes fade { from { opacity: 0; } }
+
 .note { margin-top: 18px; text-align: center; font-size: 13px; color: var(--dim); }
 
 /* ── Floating tab bar ── */
@@ -139,7 +222,10 @@ svg.ic { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-wid
 .plus svg { width: 26px; height: 26px; stroke-width: 2.2; }
 
 /* ── Toast ── */
-#toast { position: fixed; inset-inline: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); margin: 0 auto; width: max-content; max-width: calc(100% - 36px); background: var(--ink); color: var(--bg); font-size: 14px; font-weight: 500; text-align: center; padding: 10px 16px; border-radius: 14px; opacity: 0; transform: translateY(8px); transition: opacity .18s ease, transform .18s ease; pointer-events: none; }
+#toast { z-index: 40; position: fixed; inset-inline: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); margin: 0 auto; width: max-content; max-width: calc(100% - 36px); background: var(--ink); color: var(--bg); font-size: 14px; font-weight: 500; text-align: center; padding: 10px 16px; border-radius: 14px; opacity: 0; transform: translateY(8px); transition: opacity .18s ease, transform .18s ease; pointer-events: none; }
 #toast.show { opacity: 1; transform: none; }
 
-@media (prefers-reduced-motion: reduce) { #toast { transition: none; } }
+@media (prefers-reduced-motion: reduce) {
+    #toast { transition: none; }
+    .sheet, .scrim { animation: none; }
+}

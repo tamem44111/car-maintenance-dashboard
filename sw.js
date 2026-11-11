@@ -1,4 +1,4 @@
-const CACHE = 'autocare-v45';
+const CACHE = 'autocare-v46';
 const ASSETS = ['./', './index.html', './styles.css', './i18n.js', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png',
     // the new design, previewed beside the current app; cached so it opens offline too
     './next/', './next/next.css', './next/next.js'];

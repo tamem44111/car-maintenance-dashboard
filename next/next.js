@@ -12,6 +12,8 @@
 (function lockStorage() {
     const proto = Object.getPrototypeOf(window.localStorage);
     ['setItem', 'removeItem', 'clear'].forEach(fn => { proto[fn] = function () {}; });
+    // Receipt photos are kept in a second store. The preview shows them and nothing more.
+    ['put', 'remove', 'save'].forEach(fn => { Photos[fn] = () => Promise.resolve(null); });
 })();
 
 const Next = {
@@ -26,7 +28,10 @@ const Next = {
         'Front Brake Pads': 'Front brake pads', 'Rear Brake Pads': 'Rear brake pads',
         'Air Filter': 'Air filter', 'Cabin Air Filter': 'Cabin filter', 'AC Service': 'AC check',
         'Transmission': 'Transmission fluid', 'Coolant Flush': 'Coolant', 'Battery': 'Battery',
-        'Spark Plugs': 'Spark plugs', 'Timing Belt': 'Timing belt'
+        'Spark Plugs': 'Spark plugs', 'Timing Belt': 'Timing belt',
+        'Tires': 'Tyres', 'Periodic Inspection': 'Periodic inspection', 'Brake Pads': 'Brake pads',
+        'Front Brake Discs': 'Front brake discs', 'Rear Brake Discs': 'Rear brake discs',
+        'Brake Fluid': 'Brake fluid', 'Wheel Bearing': 'Wheel bearing'
     },
     // One or two words, for labels on the road strip
     SHORT: {
@@ -51,12 +56,29 @@ const Next = {
 
     // "4 Nov", in the Gregorian calendar and Latin digits in both languages, to
     // match every other date in the app.
-    day(iso) {
+    date(iso, parts) {
         if (!iso) return '';
         const d = new Date(iso);
         if (isNaN(d)) return iso;
         const locale = I18N.lang === 'ar' ? 'ar-u-ca-gregory-nu-latn' : 'en-GB';
-        return new Intl.DateTimeFormat(locale, { day: 'numeric', month: 'short', timeZone: 'UTC' }).format(d);
+        // British English abbreviates September to four letters; every other month has three
+        return new Intl.DateTimeFormat(locale, { ...parts, timeZone: 'UTC' }).format(d).replace(/\bSept\b/, 'Sep');
+    },
+    day(iso) { return this.date(iso, { day: 'numeric', month: 'short' }); },
+
+    // 1,838.24 stays exact where a bill is being read; lists round to whole riyals
+    money(v, exact) {
+        const n = Number(v) || 0;
+        const cents = exact && Math.round(n * 100) % 100 !== 0;
+        const text = cents ? n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : this.num(n);
+        return `${text} <small>${t('SAR')}</small>`;
+    },
+
+    // "3 receipts". Arabic changes the noun with the number (1, 2, 3 to 10, 11 and
+    // up), so each counted phrase has a form for each case in i18n.js.
+    count(n, one, other) {
+        if (I18N.lang !== 'ar') return (n === 1 ? one : other).replace('{n}', this.num(n));
+        return t(other + '|' + new Intl.PluralRules('ar').select(n), { n: this.num(n) });
     },
 
     name(type) { return I18N.lang === 'ar' ? I18N.t(type) : (this.NAMES[type] || type); },
@@ -69,16 +91,47 @@ const Next = {
         return t('{a} + {n} more', { a: names[0], n: names.length - 1 });
     },
 
+    SCREENS: ['home', 'history'],
+    filter: '',             // History: '' for everything, a job type, or '@accident'
+
     init() {
         I18N.init();
-        document.addEventListener('click', e => {
-            const el = e.target.closest('[data-act]');
-            if (!el) return;
-            this.toast(t(el.dataset.act === 'later'
-                ? 'This screen comes next.'
-                : 'This is a preview. Use the current app to change records.'));
+        document.addEventListener('click', e => this.onClick(e));
+        document.addEventListener('keydown', e => {
+            if (e.key !== 'Escape') return;
+            if (document.getElementById('viewer').classList.contains('open')) this.closePhoto();
+            else this.closeSheet();
         });
         this.render();
+    },
+
+    onClick(e) {
+        const el = e.target.closest('[data-go],[data-visit],[data-filter],[data-photo],[data-step],[data-close],[data-act]');
+        if (!el) return;
+        const d = el.dataset;
+        if ('go' in d) return this.go(d.go);
+        if ('visit' in d) return this.openVisit(d.visit, el);
+        if ('filter' in d) return this.setFilter(d.filter);
+        if ('photo' in d) return this.openPhoto(Number(d.photo));
+        if ('step' in d) return this.stepPhoto(Number(d.step));
+        if ('close' in d) return d.close === 'viewer' ? this.closePhoto() : this.closeSheet();
+        this.toast(t(d.act === 'later'
+            ? 'This screen comes next.'
+            : 'This is a preview. Use the current app to change records.'));
+    },
+
+    screen() {
+        const name = location.hash.slice(1);
+        return this.SCREENS.includes(name) ? name : 'home';
+    },
+
+    // Tabs are places, not steps, so moving between them leaves nothing to go back
+    // through. The address still changes, so reopening lands on the same screen.
+    go(name) {
+        history.replaceState(null, '', name === 'home' ? location.pathname + location.search : '#' + name);
+        this.filter = '';
+        this.render();
+        window.scrollTo(0, 0);
     },
 
     // Every scheduled job with a record, placed on one road. A job due by date is
@@ -205,10 +258,13 @@ const Next = {
             <strong class="word ${cls}">${text}</strong></button>`;
     },
 
-    dockHTML() {
-        const tab = (icon, label, on) => `<button type="button" ${on ? 'aria-current="page"' : 'data-act="later"'}>${this.icon(icon)}${t(label)}</button>`;
+    dockHTML(screen) {
+        const tab = (icon, label, name) => {
+            const how = name === screen ? 'aria-current="page"' : name ? `data-go="${name}"` : 'data-act="later"';
+            return `<button type="button" ${how}>${this.icon(icon)}${t(label)}</button>`;
+        };
         return `<nav class="dock" aria-label="${t('Main')}">
-            <div class="pill">${tab('home', 'Home', true)}${tab('hist', 'History')}${tab('car', 'Car')}</div>
+            <div class="pill">${tab('home', 'Home', 'home')}${tab('hist', 'History', 'history')}${tab('car', 'Car')}</div>
             <button type="button" class="plus" data-act="locked" aria-label="${t('Log')}">${this.icon('plus')}</button>
         </nav>`;
     },
@@ -222,22 +278,236 @@ const Next = {
                 <p class="note">${t('No car yet. Add one in the current app.')}</p>`;
             return;
         }
+        const screen = this.screen();
+        app.innerHTML = (screen === 'history' ? this.historyHTML(car, back) : this.homeHTML(car, back))
+            + `<p class="note">${t('Preview. Nothing here changes your records.')}</p>`
+            + this.dockHTML(screen);
+        if (screen === 'home') this.settleLabels();
+    },
+
+    homeHTML(car, back) {
         const proj = Storage.getProjectedMileage(car);
         const visits = this.visits(this.jobs(car));
         const read = proj.lastDate
             ? t(proj.estimated ? 'Estimated. Last read {d}.' : 'Read on {d}.', { d: this.day(proj.lastDate) })
             : t('No reading yet');
-
-        app.innerHTML = `
+        return `
             <div class="head"><span class="head-car">${esc(car.make)} ${esc(car.model)} ${esc(car.year)}</span>${back}</div>
             <div class="odo">${proj.km ? this.num(proj.km) : '—'}<small>${t('km')}</small></div>
             <div class="est"><span>${read}</span><button type="button" data-act="locked">${t('Update')}</button></div>
             ${this.roadHTML(visits)}
             ${this.nextHTML(visits)}
-            <div class="tiles">${this.costTile(car)}${this.docsTile(car)}</div>
-            <p class="note">${t('Preview. Nothing here changes your records.')}</p>
-            ${this.dockHTML()}`;
-        this.settleLabels();
+            <div class="tiles">${this.costTile(car)}${this.docsTile(car)}</div>`;
+    },
+
+    // ── History ──
+    // The logbook, one entry per trip to the workshop: every record written for the
+    // same day is one visit, whatever was done and whoever paid.
+    pastVisits(car) {
+        const place = type => { const i = Recommendations.ALL_TYPES.indexOf(type); return i < 0 ? 99 : i; };
+        const byDay = {};
+        Storage.getServices(car.id).forEach(s => { if (s.date) (byDay[s.date] = byDay[s.date] || []).push(s); });
+        return Object.keys(byDay).sort().reverse()
+            .map(date => this.sumVisit(date, byDay[date].slice().sort((a, b) => place(a.type) - place(b.type))));
+    },
+
+    sumVisit(date, records) {
+        const kms = records.map(s => parseInt(s.mileage, 10)).filter(n => n > 0);
+        return {
+            date, records,
+            km: kms.length ? Math.max(...kms) : null,
+            // what the owner paid, and separately what insurance paid for him
+            paid: records.reduce((n, s) => n + Storage.getOwnCost(s), 0),
+            insured: records.reduce((n, s) => n + (s.insurancePaid ? Storage.getServiceCost(s) : 0), 0),
+            // one invoice often covers several jobs, so the same photo is counted once
+            photos: [...new Set(records.flatMap(s => (s.bills || []).flatMap(b => Photos.idsFor(b))))],
+            accident: records.some(s => s.accident),
+            checkOnly: records.every(s => s.checkOnly),
+            fromMemory: records.every(s => s.backfilled)
+        };
+    },
+
+    matches(s) {
+        return !this.filter || (this.filter === '@accident' ? !!s.accident : s.type === this.filter);
+    },
+
+    // With a job picked, each visit shows that job alone: when it was done and what
+    // it cost. The full visit is still one tap away.
+    shownVisits(car) {
+        return this.pastVisits(car)
+            .map(v => this.filter ? this.sumVisit(v.date, v.records.filter(s => this.matches(s))) : v)
+            .filter(v => v.records.length);
+    },
+
+    list(bits) { return bits.map((b, i) => i ? this.lower(b) : b).join(t(', ')); },
+
+    visitRow(v) {
+        const bits = [];
+        if (v.km) bits.push(t('{km} km', { km: this.num(v.km) }));
+        else if (v.fromMemory) bits.push(t('From memory'));
+        if (v.checkOnly) bits.push(t('Checked only'));
+        if (v.accident) bits.push(t('Accident'));
+        if (v.insured) bits.push(t('Insurance paid {v} SAR', { v: this.num(v.insured) }));
+        if (v.photos.length) bits.push(this.count(v.photos.length, '{n} receipt', '{n} receipts'));
+        return `<button type="button" class="visit" data-visit="${esc(v.date)}">
+            <span class="when"><b>${new Date(v.date).getUTCDate()}</b>${this.date(v.date, { month: 'short' })}</span>
+            <span class="what"><strong>${esc(this.join(v.records.map(s => this.name(s.type))))}</strong>${bits.length ? `<span>${this.list(bits)}</span>` : ''}</span>
+            ${v.paid > 0 ? `<span class="cost">${this.money(v.paid)}</span>` : ''}
+        </button>`;
+    },
+
+    historyList(car) {
+        const years = [];
+        this.shownVisits(car).forEach(v => {
+            const y = v.date.slice(0, 4);
+            const last = years[years.length - 1];
+            if (last && last.y === y) last.visits.push(v); else years.push({ y, visits: [v] });
+        });
+        return years.map(g => {
+            const paid = g.visits.reduce((n, v) => n + v.paid, 0);
+            return `<section class="year" aria-label="${g.y}">
+                <h2><span>${g.y}</span>${paid > 0 ? `<span>${this.money(paid)}</span>` : ''}</h2>
+                <div class="card">${g.visits.map(v => this.visitRow(v)).join('')}</div>
+            </section>`;
+        }).join('');
+    },
+
+    // One chip per kind of job that has a record, the most frequent first
+    chipsHTML(car) {
+        const all = Storage.getServices(car.id);
+        const seen = {};
+        all.forEach(s => { seen[s.type] = (seen[s.type] || 0) + 1; });
+        const types = Object.keys(seen).sort((a, b) => seen[b] - seen[a]);
+        if (types.length < 2) return '';
+        const chip = (key, label) => `<button type="button" class="chip" data-filter="${esc(key)}" aria-pressed="${this.filter === key}">${esc(label)}</button>`;
+        return `<div class="chips" role="group" aria-label="${t('Show')}">${chip('', t('All'))}${types.map(ty => chip(ty, this.name(ty))).join('')}${all.some(s => s.accident) ? chip('@accident', t('Accident')) : ''}</div>`;
+    },
+
+    historyHTML(car, back) {
+        const visits = this.pastVisits(car);
+        const head = `<div class="head"><h1 class="title">${t('History')}</h1>${back}</div>`;
+        if (!visits.length) return `${head}<p class="lede">${t('Nothing logged yet. Your first service will appear here.')}</p>`;
+        const since = this.date(visits[visits.length - 1].date, { month: 'short', year: 'numeric' });
+        return `${head}
+            <p class="lede">${t('{visits} since {d}', { visits: this.count(visits.length, '{n} visit', '{n} visits'), d: since })}</p>
+            ${this.chipsHTML(car)}
+            <div id="hist-list">${this.historyList(car)}</div>`;
+    },
+
+    setFilter(key) {
+        this.filter = key;
+        document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.filter === key)));
+        document.getElementById('hist-list').innerHTML = this.historyList(Storage.getCars()[0]);
+    },
+
+    // ── One visit, opened as a sheet over the list ──
+    jobHTML(s) {
+        const cost = Storage.getServiceCost(s);
+        const tags = [];
+        if (s.accident) tags.push(t('Accident'));
+        if (s.insurancePaid) tags.push(t('Paid by insurance'));
+        if (s.checkOnly) tags.push(t('Checked only'));
+        if (parseFloat(s.padThickness) > 0) tags.push(t('Pads at {mm} mm', { mm: esc(s.padThickness) }));
+        if (s.inspectionResult) tags.push(t(s.inspectionResult === 'pass' ? 'Passed' : 'Failed'));
+        if (s.inspectionExpiry) tags.push(t('Valid until') + ' ' + this.date(s.inspectionExpiry, { day: 'numeric', month: 'short', year: 'numeric' }));
+        if (s.inspectionCenter) tags.push(esc(t(s.inspectionCenter)));
+
+        const bills = s.bills || [];
+        const lines = bills.length > 1 || bills.some(b => b.label || b.vendor) ? bills.map(b => `
+            <li><span><span dir="auto">${esc(b.label || t(b.kind || 'Other'))}</span><small dir="auto">${esc([b.label ? t(b.kind || 'Other') : '', b.vendor].filter(Boolean).join(t(', ')))}</small></span>
+                <span class="amt">${this.money(b.amount, true)}</span></li>`).join('') : '';
+
+        return `<div class="job">
+            <div class="job-top"><strong>${esc(this.name(s.type))}</strong>${cost > 0 ? `<span class="amt">${this.money(cost, true)}</span>` : ''}</div>
+            ${tags.length ? `<p class="tags">${this.list(tags)}</p>` : ''}
+            ${s.notes ? `<p class="job-note" dir="auto">${esc(s.notes)}</p>` : ''}
+            ${lines ? `<ul class="bills">${lines}</ul>` : ''}
+        </div>`;
+    },
+
+    sheetHTML(v) {
+        const thumbs = v.photos.map((id, i) => `<button type="button" class="thumb" data-photo="${i}" aria-label="${t('Receipt {n}', { n: i + 1 })}"><img alt="" data-thumb="${esc(id)}"></button>`).join('');
+        const line = (label, amount) => `<div class="sum"><span>${t(label)}</span><strong>${this.money(amount, true)}</strong></div>`;
+        const totals = v.insured ? line('Insurance paid', v.insured) + line('You paid', v.paid)
+            : v.paid > 0 ? line('Total', v.paid) : '';
+        return `<div class="scrim" data-close="sheet"></div>
+            <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
+                <div class="sheet-head">
+                    <div><h2 id="sheet-title">${this.date(v.date, { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
+                        ${v.km ? `<p>${t('{km} km', { km: this.num(v.km) })}</p>` : ''}</div>
+                    <button type="button" class="round" data-close="sheet" aria-label="${t('Close')}">${this.icon('close')}</button>
+                </div>
+                <div class="card">${v.records.map(s => this.jobHTML(s)).join('')}</div>
+                ${thumbs ? `<div class="card"><h2>${t('Receipts')}</h2><div class="thumbs">${thumbs}</div></div>` : ''}
+                ${totals ? `<div class="card sums">${totals}</div>` : ''}
+                <button type="button" class="quiet" data-act="locked">${t('Edit')}</button>
+            </section>`;
+    },
+
+    openVisit(date, opener) {
+        const v = this.pastVisits(Storage.getCars()[0]).find(x => x.date === date);
+        if (!v) return;
+        this._opener = opener || null;
+        this._photos = v.photos;
+        const host = document.getElementById('sheet');
+        host.innerHTML = this.sheetHTML(v);
+        host.classList.add('open');
+        document.body.classList.add('locked');
+        document.getElementById('app').inert = true;
+        host.querySelector('button[data-close]').focus();
+        // Receipts live in the phone's photo store and arrive a moment after the text
+        host.querySelectorAll('img[data-thumb]').forEach(img => {
+            const gone = () => img.closest('.thumb').classList.add('missing');
+            Photos.get(img.dataset.thumb).then(url => { if (url) img.src = url; else gone(); }).catch(gone);
+        });
+    },
+
+    closeSheet() {
+        const host = document.getElementById('sheet');
+        if (!host.classList.contains('open')) return;
+        host.classList.remove('open');
+        host.innerHTML = '';
+        document.body.classList.remove('locked');
+        document.getElementById('app').inert = false;
+        if (this._opener && document.contains(this._opener)) this._opener.focus();
+    },
+
+    // ── A receipt, full screen ──
+    openPhoto(i) {
+        const many = this._photos.length > 1;
+        const host = document.getElementById('viewer');
+        this._photoAt = i;
+        host.innerHTML = `<div class="viewer-bar"><span id="viewer-count"></span>
+                <button type="button" class="round" data-close="viewer" aria-label="${t('Close')}">${this.icon('close')}</button></div>
+            <img id="viewer-img" alt="${t('Receipt')}">
+            ${many ? `<button type="button" class="round step prev" data-step="-1" aria-label="${t('Previous')}">${this.icon('chev', 'flip back')}</button>
+                <button type="button" class="round step next" data-step="1" aria-label="${t('Next')}">${this.icon('chev', 'flip')}</button>` : ''}`;
+        host.classList.add('open');
+        document.getElementById('sheet').inert = true;
+        host.querySelector('button[data-close]').focus();
+        this.showPhoto();
+    },
+
+    showPhoto() {
+        const ids = this._photos, i = this._photoAt;
+        const img = document.getElementById('viewer-img');
+        document.getElementById('viewer-count').textContent = ids.length > 1 ? `${i + 1} / ${ids.length}` : '';
+        img.removeAttribute('src');
+        const gone = () => this.toast(t('This receipt photo is not on this phone.'));
+        Photos.get(ids[i]).then(url => { if (this._photoAt !== i) return; if (url) img.src = url; else gone(); }).catch(gone);
+    },
+
+    stepPhoto(delta) {
+        const n = this._photos.length;
+        this._photoAt = (this._photoAt + delta + n) % n;
+        this.showPhoto();
+    },
+
+    closePhoto() {
+        const host = document.getElementById('viewer');
+        host.classList.remove('open');
+        host.innerHTML = '';
+        document.getElementById('sheet').inert = false;
     },
 
     toast(message) {

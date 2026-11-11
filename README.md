@@ -105,6 +105,20 @@ On the road strip, a job due by date has no km limit. Its place is an estimate a
 driving rate, so it is rounded and labelled "about". Jobs within 2,000 km of each other
 share a marker, because they are one trip to the workshop.
 
+**History is read by visit, not by record.** Every record written for the same day is one
+visit, whatever was done and whoever paid. A row and a year show what the owner paid;
+insurance money is named beside the visit and never added to a total. One photographed
+invoice often covers several jobs, so a photo is counted and shown once per visit. Picking a
+job from the chips shows that job alone: when it was done and what it cost. Counted Arabic
+phrases ("3 فواتير", "16 زيارة") take the noun's form from `Intl.PluralRules`, one entry
+per form in `i18n.js`. The preview also switches off writes to the receipt photo store.
+
+**The checks must not cost the owner a receipt.** Receipt photos are in IndexedDB, outside
+the `localStorage` snapshot the suite restores. The app tidies away any photo no bill points
+to, and with the fixture loaded that is every photo there is: a run used to delete them all.
+Tidying is now off during a run, and the photo store is compared at the end, repaired, and
+reported as a failure if anything went missing.
+
 **Nothing may be dated in the future.** `logOdometer` refuses a future reading and
 `addService` pulls a future service date back to today, because either one silently
 corrupts the schedule: a reading dated tomorrow becomes the car's current mileage, and a
