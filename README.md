@@ -11,17 +11,20 @@ Bilingual (EN/AR) offline-first PWA for tracking car maintenance, built for Saud
 
 | File | Responsibility |
 |---|---|
-| `index.html` | Shell, nav, page containers, header controls (language / theme / car selector) |
+| `index.html` | The app: the new design's page (Home, History, Car), opened by the installed icon |
+| `next/next.js` | Its three screens and the sheets that show a visit or a receipt |
+| `next/forms.js` | Everything in it that changes a record: logging, editing, odometer, documents, intervals, settings |
+| `next/next.css` | Its look. Follows the phone's light and dark; mirrors for Arabic through logical properties |
+| `classic.html` | The screens it replaced, kept one tap away (Car, Settings, Classic screens) |
 | `i18n.js` | EN/AR dictionary + RTL. Keys are the English strings themselves |
 | `storage.js` | All data + computation: services, odometer, warranties, trash, insights, keep-or-sell |
 | `recommendations.js` | Manufacturer service intervals, whichever-comes-first due logic |
 | `features.js` | Action Center, Documents, Warranty Center, bills, analytics, settings, backup |
 | `photos.js` | Receipt images: in-browser compression + IndexedDB |
-| `app.js` | Routing, rendering, all modals |
+| `app.js` | The classic screens: routing, rendering, all modals |
 | `sw.js` | Service worker. **Bump `CACHE` on every deploy** |
 | `checks.html` / `checks.js` | The verification suite. Open and press Run |
 | `sw.check.js` | The service worker's fetch handling, against a fake network. `node sw.check.js` |
-| `next/` | The new design ("Clean iPhone"), as a read-only preview beside the current app |
 
 Data lives in `localStorage` (`autocare_data`) except receipt photos, which are in IndexedDB.
 
@@ -89,17 +92,28 @@ fuel setting. Adding (`merge`) never overrides what the phone already has.
 **A weak signal must not hold the app up.** `sw.js` is network-first with a 2.5-second limit
 before it serves the saved copy; the slow download still refreshes the cache for next time.
 
-**The redesign is being built beside the app, not inside it.** `next/` is the new design,
-reached from a link at the top of the dashboard. It loads the same `storage.js`,
-`recommendations.js` and `features.js`, so it cannot show a different number from the app,
-and it switches off `localStorage` writes for its own page before anything else runs, so it
-cannot change a record whatever its code does. The link has to live inside the current app:
-on iPhone an installed app's data is separate from Safari's, so the same address opened in
-Safari would be empty. The measured reasons for the redesign: Home was about four screens of
-eight equal blocks, there were seven tabs, 29 records took nine screens, and the add-service
-form had 39 fields. The agreed structure is a one-screen Home with a "road ahead" strip,
-history grouped by visit, four tabs, and logging in steps. Screens move over one at a time;
-when the last one is done, `next/` replaces the app and the link goes.
+**The new design is the app; the old screens are `classic.html`.** It was built beside the
+app as a read-only preview, one screen at a time, and took over on 2026-11-12. The measured
+reasons for it: Home was about four screens of eight equal blocks, there were seven tabs, 29
+records took nine screens, and the add-service form had 39 fields. Now: a one-screen Home
+with a "road ahead" strip, history by visit, a Car screen (schedule, documents, tyres,
+warranties, costs, settings), and logging in three steps. It loads the same `storage.js`,
+`recommendations.js` and `features.js` as the classic screens, so the two cannot show
+different numbers. Not rebuilt, and reached through Classic screens: the car's own details,
+the fuel log, the trip planner, keep-or-sell, custom reminders, and the trash.
+
+**One way to save a job.** `Features.logVisit` and `Features.updateJob` are what the new
+sheets save through, and the follow-ups a saved job owes (`oilFollowUp`, `applyInspection`,
+`inspectionFollowUp`) are the same functions the classic form calls. A record must mean the
+same thing whichever screen wrote it. Logging takes one cost per job; a shop name or a
+receipt photo turns that cost into a bill, and one photographed invoice is attached to
+every job it priced.
+
+**No system popups in the new design.** Warnings appear in the sheet, beside the button
+that raised them, and a second tap ("Save anyway", "Tap again to delete") is the
+confirmation. A delete can be taken back from the toast. The backup code in `features.js`
+still speaks to the classic screens through `App` and `alert`; `next.js` answers both with
+its own sheets, so one tested export and import serves both designs.
 
 On the road strip, a job due by date has no km limit. Its place is an estimate at the car's
 driving rate, so it is rounded and labelled "about". Jobs within 2,000 km of each other
@@ -111,7 +125,7 @@ insurance money is named beside the visit and never added to a total. One photog
 invoice often covers several jobs, so a photo is counted and shown once per visit. Picking a
 job from the chips shows that job alone: when it was done and what it cost. Counted Arabic
 phrases ("3 فواتير", "16 زيارة") take the noun's form from `Intl.PluralRules`, one entry
-per form in `i18n.js`. The preview also switches off writes to the receipt photo store.
+per form in `i18n.js`.
 
 **The checks must not cost the owner a receipt.** Receipt photos are in IndexedDB, outside
 the `localStorage` snapshot the suite restores. The app tidies away any photo no bill points

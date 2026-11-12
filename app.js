@@ -113,7 +113,7 @@ const App = {
     closeModal() {
         document.getElementById('modal').style.display = 'none';
         if (typeof Features !== 'undefined') Features._pendingImport = null;
-        // A new version arrived while a form was open (see index.html)
+        // A new version arrived while a form was open (see classic.html)
         if (window.__reloadAfterModal) location.reload();
     },
 
@@ -370,38 +370,7 @@ const App = {
         setTimeout(() => { Features.recalcBillTotal(); this._syncServiceMileage(isEdit); this._toggleServiceExtras(); this._paintCheckOnly(); this._paintAccident(); }, 40);
     },
 
-    // A logged inspection is the authority on when the certificate expires, so it
-    // updates the car's Fahes date. A failure means a re-test is owed, not a
-    // year of cover, so that instead becomes a reminder.
-    _applyInspection(carId, insp, serviceDate) {
-        if (!insp || !insp.inspectionResult) return;
-        const car = Storage.getCars().find(c => c.id === carId);
-        if (!car) return;
-
-        if (insp.inspectionResult === 'fail') {
-            const retest = new Date(serviceDate || new Date());
-            retest.setDate(retest.getDate() + 30);
-            const due = retest.toISOString().split('T')[0];
-            const existing = Storage.getReminders(carId)
-                .find(r => r.type === 'Inspection' && r.retest && !r.completed);
-            if (existing) Storage.updateReminder(existing.id, { dueDate: due });
-            else Storage.addReminder({
-                carId, type: 'Inspection', dueDate: due, dueMileage: '',
-                notes: 'Re-test after a failed inspection',
-                completed: false, autoCreated: true, retest: true
-            });
-            return;
-        }
-
-        if (insp.inspectionExpiry) {
-            Storage.updateCar(carId, { fahesExpiry: insp.inspectionExpiry });
-            Storage.syncDocumentReminders(carId);
-            // a pass clears any outstanding re-test
-            Storage.getReminders(carId)
-                .filter(r => r.type === 'Inspection' && r.retest && !r.completed)
-                .forEach(r => Storage.updateReminder(r.id, { completed: true }));
-        }
-    },
+    _applyInspection(carId, insp, serviceDate) { Features.applyInspection(carId, insp, serviceDate); },
 
     _paintInspectionDerived() {
         const box = document.getElementById('f-insp-derived');
@@ -562,32 +531,8 @@ const App = {
     },
 
     _handleOilReminder(data, ignoreId) {
-        if(!Recommendations.isNewest(data.carId,'Oil Change',data.date,ignoreId)) return;
-        const interval=document.querySelector('input[name="oil-interval"]:checked');
-        // No box ticked means a custom interval the three choices don't cover. Keep it.
-        if(interval) data.oilInterval=interval.value;
-        const car=data.carId?Storage.getCars().find(c=>c.id===data.carId):null;
-        // The oil you use is a property of how you run the car, not of one past
-        // service — so it becomes this car's Oil Change interval, which the whole
-        // schedule already respects. Before this the choice fed only the Reminders
-        // page while every other screen kept using Ford's figure, so switching
-        // 7,000 to 5,000 appeared to do nothing at all.
-        if(car&&interval){
-            const mfr=Recommendations.getForService(car.make,car.model,'Oil Change');
-            const lbl={'5000':'Regular','7000':'Semi-synthetic','10000':'Full synthetic'};
-            Recommendations.saveCustom(data.carId,'Oil Change',parseInt(interval.value),
-                (mfr&&mfr.months)||6,t('Your oil choice: {label}',{label:t(lbl[interval.value]||'Regular')}));
-        }
-        if(data.mileage&&car){
-            const rec=Recommendations.getEffective(car,'Oil Change');
-            const next=parseInt(data.mileage)+rec.km;
-            Storage.getReminders(data.carId).filter(r=>r.type==='Oil Change'&&!r.completed&&r.autoCreated).forEach(r=>Storage.dropReminder(r.id));
-            // The time limit, like every other reminder. The km limit is its own field;
-            // an estimate of when that will be reached belongs on screen, not in a
-            // date that later reads as a deadline.
-            const due=new Date(data.date); due.setMonth(due.getMonth()+(rec.months||6));
-            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:due.toISOString().split('T')[0],dueMileage:next.toString(),notes:`Auto: next oil change at ${next.toLocaleString()} km`,completed:false,autoCreated:true});
-        }
+        const picked=document.querySelector('input[name="oil-interval"]:checked');
+        Features.oilFollowUp(data, picked?picked.value:null, ignoreId);
     },
 
     // ── Fuel Modal ──

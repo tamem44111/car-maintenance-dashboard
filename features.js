@@ -393,6 +393,140 @@ const Features = {
 
     // Drop receipt photos no bill references any more. Trashed services still count
     // as referencing theirs, so restoring a deleted service keeps its receipts.
+    // ══════════════════════════════════════════
+    // One way to save logged work, shared by both designs. The classic form and the
+    // new logging sheet both end here, so a record means the same thing whichever
+    // screen wrote it.
+    // ══════════════════════════════════════════
+
+    // A logged inspection is the authority on when the certificate expires, so it
+    // updates the car's Fahes date. A failure means a re-test is owed, not a
+    // year of cover, so that instead becomes a reminder.
+    applyInspection(carId, insp, serviceDate) {
+        if (!insp || !insp.inspectionResult) return;
+        const car = Storage.getCars().find(c => c.id === carId);
+        if (!car) return;
+
+        if (insp.inspectionResult === 'fail') {
+            const retest = new Date(serviceDate || new Date());
+            retest.setDate(retest.getDate() + 30);
+            const due = retest.toISOString().split('T')[0];
+            const existing = Storage.getReminders(carId)
+                .find(r => r.type === 'Inspection' && r.retest && !r.completed);
+            if (existing) Storage.updateReminder(existing.id, { dueDate: due });
+            else Storage.addReminder({
+                carId, type: 'Inspection', dueDate: due, dueMileage: '',
+                notes: 'Re-test after a failed inspection',
+                completed: false, autoCreated: true, retest: true
+            });
+            return;
+        }
+
+        if (insp.inspectionExpiry) {
+            Storage.updateCar(carId, { fahesExpiry: insp.inspectionExpiry });
+            Storage.syncDocumentReminders(carId);
+            // a pass clears any outstanding re-test
+            Storage.getReminders(carId)
+                .filter(r => r.type === 'Inspection' && r.retest && !r.completed)
+                .forEach(r => Storage.updateReminder(r.id, { completed: true }));
+        }
+    },
+
+    // `interval` is the km figure picked for this oil ('5000', '7000', '10000'), or
+    // null when none was picked: a custom interval the three choices don't cover. Keep it.
+    oilFollowUp(data, interval, ignoreId) {
+        if(!Recommendations.isNewest(data.carId,'Oil Change',data.date,ignoreId)) return;
+        if(interval) data.oilInterval=String(interval);
+        const car=data.carId?Storage.getCars().find(c=>c.id===data.carId):null;
+        // The oil you use is a property of how you run the car, not of one past
+        // service — so it becomes this car's Oil Change interval, which the whole
+        // schedule already respects. Before this the choice fed only the Reminders
+        // page while every other screen kept using Ford's figure, so switching
+        // 7,000 to 5,000 appeared to do nothing at all.
+        if(car&&interval){
+            const mfr=Recommendations.getForService(car.make,car.model,'Oil Change');
+            const lbl={'5000':'Regular','7000':'Semi-synthetic','10000':'Full synthetic'};
+            Recommendations.saveCustom(data.carId,'Oil Change',parseInt(interval),
+                (mfr&&mfr.months)||6,t('Your oil choice: {label}',{label:t(lbl[interval]||'Regular')}));
+        }
+        if(data.mileage&&car){
+            const rec=Recommendations.getEffective(car,'Oil Change');
+            const next=parseInt(data.mileage)+rec.km;
+            Storage.getReminders(data.carId).filter(r=>r.type==='Oil Change'&&!r.completed&&r.autoCreated).forEach(r=>Storage.dropReminder(r.id));
+            // The time limit, like every other reminder. The km limit is its own field;
+            // an estimate of when that will be reached belongs on screen, not in a
+            // date that later reads as a deadline.
+            const due=new Date(data.date); due.setMonth(due.getMonth()+(rec.months||6));
+            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:due.toISOString().split('T')[0],dueMileage:next.toString(),notes:`Auto: next oil change at ${next.toLocaleString()} km`,completed:false,autoCreated:true});
+        }
+    },
+
+    // An old record must not rewrite today's certificate: it is not the newest
+    // inspection, or it ran out before the one the car holds now.
+    inspectionFollowUp(carId, insp, date, ignoreId) {
+        if (!insp || !insp.inspectionResult) return;
+        const held = (Storage.getCars().find(c => c.id === carId) || {}).fahesExpiry;
+        const stale = !Recommendations.isNewest(carId, 'Periodic Inspection', date, ignoreId || null)
+            || (insp.inspectionExpiry && held && held > insp.inspectionExpiry);
+        if (!stale) this.applyInspection(carId, insp, date);
+    },
+
+    // Saves one trip to the workshop: one record per job, each with its own cost.
+    // visit = { carId, date, mileage, notes, accident, insurancePaid, shop, photoIds,
+    //           jobs: [{ type, cost, checkOnly, padThickness, oilInterval, insp }] }
+    logVisit(visit) {
+        const car = Storage.getCars().find(c => c.id === visit.carId);
+        if (!car || !visit.jobs || !visit.jobs.length) return [];
+        // Logging a timing belt tells us the engine is belt-driven, which is what
+        // the schedule needs in order to stop ignoring it.
+        if (visit.jobs.some(j => j.type === 'Timing Belt') && !car.timingType) Storage.updateCar(car.id, { timingType: 'belt' });
+        const photoIds = visit.photoIds || [];
+        const mileage = String(visit.mileage || '');
+        const anyPriced = visit.jobs.some(j => parseFloat(j.cost) > 0);
+        const ids = visit.jobs.map((j, i) => {
+            const amount = parseFloat(j.cost) > 0 ? String(j.cost) : '';
+            // A receipt or a shop name turns the cost into a bill. One photographed
+            // invoice covers every job it priced, so each of them points at it; with
+            // nothing priced, the first job keeps the receipt.
+            const holdsReceipt = photoIds.length > 0 && (amount !== '' || (!anyPriced && i === 0));
+            const bills = ((amount && visit.shop) || holdsReceipt) ? [{
+                id: 'bl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
+                kind: 'Other', label: '', vendor: visit.shop || '',
+                photoIds: holdsReceipt ? photoIds.slice() : [],
+                amount, warrantyMonths: '', warrantyKm: '', startKm: mileage, date: visit.date
+            }] : [];
+            const data = {
+                carId: car.id, type: j.type, date: visit.date, mileage,
+                notes: i === 0 ? (visit.notes || '') : '',
+                padThickness: j.padThickness || '', checkOnly: !!j.checkOnly,
+                accident: !!visit.accident, insurancePaid: !!(visit.accident && visit.insurancePaid),
+                cost: amount, bills,
+                ...(Recommendations.isInspectionType(j.type) ? (j.insp || {}) : {})
+            };
+            if (!data.checkOnly) {
+                if (j.type === 'Oil Change') this.oilFollowUp(data, j.oilInterval || null);
+                else if (mileage) Recommendations.createReminderFromService(car, j.type, mileage, data.date);
+            }
+            const saved = Storage.addService(data);
+            if (Recommendations.isInspectionType(j.type)) this.inspectionFollowUp(car.id, data, data.date, null);
+            return saved.id;
+        });
+        this.cleanupPhotos();
+        return ids;
+    },
+
+    // Saves changes to one record. `data` is the whole record as it should now read.
+    updateJob(id, data, oilInterval) {
+        const car = Storage.getCars().find(c => c.id === data.carId);
+        if (!data.checkOnly) {
+            if (data.type === 'Oil Change') this.oilFollowUp(data, oilInterval || null, id);
+            else if (data.mileage && car) Recommendations.createReminderFromService(car, data.type, data.mileage, data.date, id);
+        }
+        Storage.updateService(id, data);
+        if (Recommendations.isInspectionType(data.type)) this.inspectionFollowUp(data.carId, data, data.date, id);
+        this.cleanupPhotos();
+    },
+
     cleanupPhotos() {
         if (typeof Photos === 'undefined') return;
         Photos.keys().then(keys => {

@@ -1,20 +1,26 @@
 // ═══════════════════════════════════════════
-// NEXT.JS — the new design, running as a read-only preview.
+// NEXT.JS — the app's screens: Home, History and Car.
 //
-// It sits beside the current app and reads the same records through the same
-// Storage and Recommendations code, so the two can never show different numbers.
-// What changes here is only how those numbers are laid out.
+// The numbers come from the same Storage, Recommendations and Features code the
+// classic screens use (classic.html), so the two can never disagree. Everything
+// that changes a record is in forms.js.
 // ═══════════════════════════════════════════
 
-// A preview must not be able to touch the owner's records, so writing is switched
-// off for this page before anything else runs. Not "we avoid calling save" — the
-// page cannot write at all, whatever a later change here calls by mistake.
-(function lockStorage() {
-    const proto = Object.getPrototypeOf(window.localStorage);
-    ['setItem', 'removeItem', 'clear'].forEach(fn => { proto[fn] = function () {}; });
-    // Receipt photos are kept in a second store. The preview shows them and nothing more.
-    ['put', 'remove', 'save'].forEach(fn => { Photos[fn] = () => Promise.resolve(null); });
-})();
+// The backup code in features.js was written for the classic screens and talks to
+// them through `App`. Here the same calls are answered with this design's sheets,
+// so one tested export and import serves both.
+const App = {
+    currentPage: 'next',
+    openModal(title, html) {
+        Next.showSheet(Next.sheetHead(t(title)) + `<div class="classic">${html}</div><button type="button" id="modal-save" hidden></button>`);
+    },
+    closeModal() { Next.closeSheet(); },
+    renderPage() { Next.render(); },
+    navigate() { Next.render(); },
+    paintLang() {}
+};
+// A message from that shared code arrives as a sheet, not a system popup
+window.alert = message => Next.notice(String(message));
 
 const Next = {
     HORIZON_KM: 20000,      // how far ahead the road strip looks
@@ -91,12 +97,24 @@ const Next = {
         return t('{a} + {n} more', { a: names[0], n: names.length - 1 });
     },
 
-    SCREENS: ['home', 'history'],
+    SCREENS: ['home', 'history', 'car'],
     filter: '',             // History: '' for everything, a job type, or '@accident'
 
     init() {
         I18N.init();
         document.addEventListener('click', e => this.onClick(e));
+        document.addEventListener('input', e => this.onInput(e));
+        document.addEventListener('change', e => this.onChange(e));
+        // A sheet is fixed to the bottom of the screen, which is where the keyboard
+        // opens. Its height is passed to the stylesheet so the sheet sits on top of it.
+        const vv = window.visualViewport;
+        if (vv) {
+            const lift = () => document.documentElement.style.setProperty('--kb', Math.max(0, Math.round(window.innerHeight - vv.height - vv.offsetTop)) + 'px');
+            vv.addEventListener('resize', lift);
+            vv.addEventListener('scroll', lift);
+        }
+        // the address can change without a tap: a link, or the phone's back gesture
+        window.addEventListener('hashchange', () => { this.closeSheet(); this.render(); });
         document.addEventListener('keydown', e => {
             if (e.key !== 'Escape') return;
             if (document.getElementById('viewer').classList.contains('open')) this.closePhoto();
@@ -106,19 +124,20 @@ const Next = {
     },
 
     onClick(e) {
-        const el = e.target.closest('[data-go],[data-visit],[data-filter],[data-photo],[data-step],[data-close],[data-act]');
-        if (!el) return;
+        const el = e.target.closest('[data-do],[data-go],[data-visit],[data-filter],[data-photo],[data-step],[data-close]');
+        if (!el || el.disabled) return;
         const d = el.dataset;
-        if ('go' in d) return this.go(d.go);
+        // every action that opens a form or changes a record is a do_… in forms.js
+        if ('do' in d) return this['do_' + d.do](d.arg, el);
+        if ('go' in d) return this.go(d.go, d.arg);
         if ('visit' in d) return this.openVisit(d.visit, el);
         if ('filter' in d) return this.setFilter(d.filter);
         if ('photo' in d) return this.openPhoto(Number(d.photo));
         if ('step' in d) return this.stepPhoto(Number(d.step));
         if ('close' in d) return d.close === 'viewer' ? this.closePhoto() : this.closeSheet();
-        this.toast(t(d.act === 'later'
-            ? 'This screen comes next.'
-            : 'This is a preview. Use the current app to change records.'));
     },
+
+    car() { return Storage.getCars()[0] || null; },
 
     screen() {
         const name = location.hash.slice(1);
@@ -127,9 +146,10 @@ const Next = {
 
     // Tabs are places, not steps, so moving between them leaves nothing to go back
     // through. The address still changes, so reopening lands on the same screen.
-    go(name) {
+    go(name, filter) {
         history.replaceState(null, '', name === 'home' ? location.pathname + location.search : '#' + name);
-        this.filter = '';
+        this.filter = filter || '';
+        this.closeSheet();
         this.render();
         window.scrollTo(0, 0);
     },
@@ -231,7 +251,7 @@ const Next = {
 
     nextHTML(visits) {
         const rows = visits.slice(0, 3).map((v, i) => `
-            <button type="button" class="row ${v.status}" data-act="locked">
+            <button type="button" class="row ${v.status}" data-do="log" data-arg="${esc(v.jobs.map(j => j.type).join('|'))}">
                 <span class="row-main"><strong>${esc(this.join(v.jobs.map(j => this.name(j.type))))}</strong><span>${this.when(v)}</span></span>
                 ${i === 0 ? `<span class="log">${t('Log')}</span>` : `<span class="chev">${this.icon('chev', 'flip')}</span>`}
             </button>`).join('');
@@ -240,7 +260,7 @@ const Next = {
 
     costTile(car) {
         const bd = Storage.getCostBreakdown(car.id);
-        return `<button type="button" class="tile" data-act="later"><span>${t('Running cost')}</span>
+        return `<button type="button" class="tile" data-go="car"><span>${t('Running cost')}</span>
             <strong>${bd ? bd.totalPerKm.toFixed(2) : '—'} <small>${t('SAR/km')}</small></strong></button>`;
     },
 
@@ -254,50 +274,62 @@ const Next = {
         if (expired) { cls = 'overdue'; text = t('{name} expired', { name: expired.name }); }
         else if (soon) { cls = 'soon'; text = t('{name}: {d} days left', { name: soon.name, d: soon.st.days }); }
         else if (!anySet) { cls = ''; text = t('Not set'); }
-        return `<button type="button" class="tile" data-act="later"><span>${t('Documents')}</span>
+        return `<button type="button" class="tile" data-go="car"><span>${t('Documents')}</span>
             <strong class="word ${cls}">${text}</strong></button>`;
     },
 
     dockHTML(screen) {
-        const tab = (icon, label, name) => {
-            const how = name === screen ? 'aria-current="page"' : name ? `data-go="${name}"` : 'data-act="later"';
-            return `<button type="button" ${how}>${this.icon(icon)}${t(label)}</button>`;
-        };
+        const tab = (icon, label, name) =>
+            `<button type="button" ${name === screen ? 'aria-current="page"' : `data-go="${name}"`}>${this.icon(icon)}${t(label)}</button>`;
         return `<nav class="dock" aria-label="${t('Main')}">
-            <div class="pill">${tab('home', 'Home', 'home')}${tab('hist', 'History', 'history')}${tab('car', 'Car')}</div>
-            <button type="button" class="plus" data-act="locked" aria-label="${t('Log')}">${this.icon('plus')}</button>
+            <div class="pill">${tab('home', 'Home', 'home')}${tab('hist', 'History', 'history')}${tab('car', 'Car', 'car')}</div>
+            <button type="button" class="plus" data-do="log" aria-label="${t('Log')}">${this.icon('plus')}</button>
         </nav>`;
     },
 
     render() {
         const app = document.getElementById('app');
-        const car = Storage.getCars()[0];
-        const back = `<a class="round" href="../" aria-label="${t('Back to the current app')}">${this.icon('close')}</a>`;
+        const car = this.car();
         if (!car) {
-            app.innerHTML = `<div class="head"><span class="head-car">AutoCare</span>${back}</div>
-                <p class="note">${t('No car yet. Add one in the current app.')}</p>`;
+            app.innerHTML = `<div class="head"><h1 class="title">AutoCare</h1></div>
+                <p class="lede">${t('No car yet.')}</p>
+                <a class="primary" href="classic.html">${t('Add your car')}</a>`;
             return;
         }
+        // Auto reminders are a view of the schedule, brought up to date on every draw,
+        // as the classic screens do.
+        Recommendations.syncAutoReminders();
         const screen = this.screen();
-        app.innerHTML = (screen === 'history' ? this.historyHTML(car, back) : this.homeHTML(car, back))
-            + `<p class="note">${t('Preview. Nothing here changes your records.')}</p>`
-            + this.dockHTML(screen);
-        if (screen === 'home') this.settleLabels();
+        app.innerHTML = this[screen + 'HTML'](car) + this.dockHTML(screen);
+        if (screen === 'home') {
+            this.settleLabels();
+            Features.scheduleNotifications();
+        }
     },
 
-    homeHTML(car, back) {
+    // The records live on this phone and nowhere else, so an overdue backup is said on Home
+    backupHTML() {
+        const b = Storage.getBackupStatus();
+        if (!b.needed) return '';
+        const text = b.never ? t('No backup yet. Your records live only on this phone.')
+            : t('Last backup was {d} days ago, and you have changes since.', { d: b.daysSinceBackup });
+        return `<button type="button" class="card nudge" data-do="backup"><span>${text}</span><b>${t('Back up')}</b></button>`;
+    },
+
+    homeHTML(car) {
         const proj = Storage.getProjectedMileage(car);
         const visits = this.visits(this.jobs(car));
         const read = proj.lastDate
             ? t(proj.estimated ? 'Estimated. Last read {d}.' : 'Read on {d}.', { d: this.day(proj.lastDate) })
             : t('No reading yet');
         return `
-            <div class="head"><span class="head-car">${esc(car.make)} ${esc(car.model)} ${esc(car.year)}</span>${back}</div>
+            <div class="head"><span class="head-car">${esc(car.make)} ${esc(car.model)} ${esc(car.year)}</span></div>
             <div class="odo">${proj.km ? this.num(proj.km) : '—'}<small>${t('km')}</small></div>
-            <div class="est"><span>${read}</span><button type="button" data-act="locked">${t('Update')}</button></div>
+            <div class="est"><span>${read}</span><button type="button" data-do="odo">${t('Update')}</button></div>
             ${this.roadHTML(visits)}
             ${this.nextHTML(visits)}
-            <div class="tiles">${this.costTile(car)}${this.docsTile(car)}</div>`;
+            <div class="tiles">${this.costTile(car)}${this.docsTile(car)}</div>
+            ${this.backupHTML()}`;
     },
 
     // ── History ──
@@ -383,9 +415,9 @@ const Next = {
         return `<div class="chips" role="group" aria-label="${t('Show')}">${chip('', t('All'))}${types.map(ty => chip(ty, this.name(ty))).join('')}${all.some(s => s.accident) ? chip('@accident', t('Accident')) : ''}</div>`;
     },
 
-    historyHTML(car, back) {
+    historyHTML(car) {
         const visits = this.pastVisits(car);
-        const head = `<div class="head"><h1 class="title">${t('History')}</h1>${back}</div>`;
+        const head = `<div class="head"><h1 class="title">${t('History')}</h1></div>`;
         if (!visits.length) return `${head}<p class="lede">${t('Nothing logged yet. Your first service will appear here.')}</p>`;
         const since = this.date(visits[visits.length - 1].date, { month: 'short', year: 'numeric' });
         return `${head}
@@ -414,7 +446,7 @@ const Next = {
 
         const bills = s.bills || [];
         const lines = bills.length > 1 || bills.some(b => b.label || b.vendor) ? bills.map(b => `
-            <li><span><span dir="auto">${esc(b.label || t(b.kind || 'Other'))}</span><small dir="auto">${esc([b.label ? t(b.kind || 'Other') : '', b.vendor].filter(Boolean).join(t(', ')))}</small></span>
+            <li><span><span dir="auto">${esc(b.label || b.vendor || t(b.kind || 'Other'))}</span><small dir="auto">${esc(b.label ? [t(b.kind || 'Other'), b.vendor].filter(Boolean).join(t(', ')) : '')}</small></span>
                 <span class="amt">${this.money(b.amount, true)}</span></li>`).join('') : '';
 
         return `<div class="job">
@@ -422,41 +454,55 @@ const Next = {
             ${tags.length ? `<p class="tags">${this.list(tags)}</p>` : ''}
             ${s.notes ? `<p class="job-note" dir="auto">${esc(s.notes)}</p>` : ''}
             ${lines ? `<ul class="bills">${lines}</ul>` : ''}
+            <button type="button" class="link" data-do="edit" data-arg="${esc(s.id)}">${t('Edit')}</button>
         </div>`;
     },
 
-    sheetHTML(v) {
+    // Every sheet starts the same way: what it is, and a way out
+    sheetHead(title, sub) {
+        return `<div class="sheet-head"><div><h2 id="sheet-title">${title}</h2>${sub ? `<p>${sub}</p>` : ''}</div>
+            <button type="button" class="round" data-close="sheet" aria-label="${t('Close')}">${this.icon('close')}</button></div>`;
+    },
+
+    visitHTML(v) {
         const thumbs = v.photos.map((id, i) => `<button type="button" class="thumb" data-photo="${i}" aria-label="${t('Receipt {n}', { n: i + 1 })}"><img alt="" data-thumb="${esc(id)}"></button>`).join('');
         const line = (label, amount) => `<div class="sum"><span>${t(label)}</span><strong>${this.money(amount, true)}</strong></div>`;
         const totals = v.insured ? line('Insurance paid', v.insured) + line('You paid', v.paid)
             : v.paid > 0 ? line('Total', v.paid) : '';
-        return `<div class="scrim" data-close="sheet"></div>
-            <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
-                <div class="sheet-head">
-                    <div><h2 id="sheet-title">${this.date(v.date, { day: 'numeric', month: 'long', year: 'numeric' })}</h2>
-                        ${v.km ? `<p>${t('{km} km', { km: this.num(v.km) })}</p>` : ''}</div>
-                    <button type="button" class="round" data-close="sheet" aria-label="${t('Close')}">${this.icon('close')}</button>
-                </div>
-                <div class="card">${v.records.map(s => this.jobHTML(s)).join('')}</div>
-                ${thumbs ? `<div class="card"><h2>${t('Receipts')}</h2><div class="thumbs">${thumbs}</div></div>` : ''}
-                ${totals ? `<div class="card sums">${totals}</div>` : ''}
-                <button type="button" class="quiet" data-act="locked">${t('Edit')}</button>
-            </section>`;
+        return this.sheetHead(this.date(v.date, { day: 'numeric', month: 'long', year: 'numeric' }), v.km ? t('{km} km', { km: this.num(v.km) }) : '')
+            + `<div class="card">${v.records.map(s => this.jobHTML(s)).join('')}</div>
+            ${thumbs ? `<div class="card"><h2>${t('Receipts')}</h2><div class="thumbs">${thumbs}</div></div>` : ''}
+            ${totals ? `<div class="card sums">${totals}</div>` : ''}
+            <button type="button" class="quiet" data-do="addTo" data-arg="${esc(v.date)}">${t('Add a job to this visit')}</button>`;
     },
 
     openVisit(date, opener) {
-        const v = this.pastVisits(Storage.getCars()[0]).find(x => x.date === date);
-        if (!v) return;
-        this._opener = opener || null;
+        const v = this.pastVisits(this.car()).find(x => x.date === date);
+        if (!v) return this.closeSheet();
         this._photos = v.photos;
+        this.showSheet(this.visitHTML(v), opener);
+    },
+
+    // ── Sheets: one at a time, over the page ──
+    // Showing a sheet while one is open swaps what is in it, without the slide.
+    showSheet(html, opener) {
         const host = document.getElementById('sheet');
-        host.innerHTML = this.sheetHTML(v);
+        const fresh = !host.classList.contains('open');
+        if (fresh) this._opener = opener || document.activeElement;
+        host.classList.toggle('still', !fresh);
+        host.innerHTML = `<div class="scrim" data-close="sheet"></div>
+            <section class="sheet" role="dialog" aria-modal="true" aria-labelledby="sheet-title">${html}</section>`;
         host.classList.add('open');
         document.body.classList.add('locked');
         document.getElementById('app').inert = true;
-        host.querySelector('button[data-close]').focus();
-        // Receipts live in the phone's photo store and arrive a moment after the text
-        host.querySelectorAll('img[data-thumb]').forEach(img => {
+        const first = host.querySelector('[autofocus]') || host.querySelector('button[data-close]');
+        if (first) first.focus();
+        this.loadThumbs(host);
+    },
+
+    // Receipts live in the phone's photo store and arrive a moment after the text
+    loadThumbs(root) {
+        root.querySelectorAll('img[data-thumb]:not([src])').forEach(img => {
             const gone = () => img.closest('.thumb').classList.add('missing');
             Photos.get(img.dataset.thumb).then(url => { if (url) img.src = url; else gone(); }).catch(gone);
         });
@@ -465,10 +511,15 @@ const Next = {
     closeSheet() {
         const host = document.getElementById('sheet');
         if (!host.classList.contains('open')) return;
-        host.classList.remove('open');
+        // a photo added to a form that was then abandoned belongs to no record
+        if (this.form && this.form.photoIds) Features.cleanupPhotos();
+        this.form = null;
+        host.classList.remove('open', 'still');
         host.innerHTML = '';
         document.body.classList.remove('locked');
         document.getElementById('app').inert = false;
+        // a new version arrived while the sheet was open (see index.html)
+        if (window.__reloadAfterSheet) return location.reload();
         if (this._opener && document.contains(this._opener)) this._opener.focus();
     },
 
@@ -510,12 +561,110 @@ const Next = {
         document.getElementById('sheet').inert = false;
     },
 
-    toast(message) {
+    // ── Car ──
+    // What the car needs and holds: its schedule, its papers, its tyres, its costs.
+    // Every job the car has a schedule for, soonest first, each said the way Home
+    // says it. A job never logged has nothing to count from yet, and goes last.
+    schedule(car) {
+        const known = this.jobs(car).map(j => ({ type: j.type, status: j.status, line: this.when({ jobs: [j] }) }));
+        const never = Recommendations.ALL_TYPES
+            .filter(type => !known.some(k => k.type === type))
+            .map(type => Recommendations.getMaintenanceStatus(car, type))
+            .filter(Boolean)
+            .map(st => ({ type: st.type, status: 'unknown', line: t('No record yet') }));
+        return known.concat(never);
+    },
+
+    every(rec) {
+        const parts = [];
+        if (rec && rec.km) parts.push(t('{km} km', { km: this.num(rec.km) }));
+        if (rec && rec.months) parts.push(t('{m} months', { m: rec.months }));
+        return parts.join(' ' + t('or') + ' ');
+    },
+
+    docLine(st) {
+        const d = st.date ? this.date(st.date, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
+        if (st.state === 'missing') return t('Not set');
+        if (st.state === 'expired') return t('Expired on {d}', { d });
+        if (st.state === 'soon') return t('{n} days left, until {d}', { n: st.days, d });
+        return t('Valid until {d}', { d });
+    },
+
+    carHTML(car) {
+        const proj = Storage.getProjectedMileage(car);
+        const row = (attrs, cls, title, sub, tail) => `<button type="button" class="row ${cls}" ${attrs}>
+            <span class="row-main"><strong>${title}</strong><span>${sub}</span></span>${tail || `<span class="chev">${this.icon('chev', 'flip')}</span>`}</button>`;
+        const fact = (label, value) => `<div class="fact"><span>${label}</span><strong>${value}</strong></div>`;
+
+        const sched = this.schedule(car).map(j =>
+            row(`data-do="job" data-arg="${esc(j.type)}"`, j.status === 'ok' || j.status === 'unknown' ? '' : j.status, esc(this.name(j.type)), j.line)).join('');
+
+        const docs = Features.DOCS.map(d => {
+            const st = Features.docStatus(car, d.key);
+            const cls = st.state === 'expired' ? 'overdue' : st.state === 'soon' ? 'soon' : '';
+            return row(`data-do="doc" data-arg="${d.key}"`, cls, esc(this.name(d.label)), this.docLine(st));
+        }).join('');
+
+        const ty = Storage.getTyreStatus(car);
+        const tyres = ty ? `<section class="card" aria-label="${t('Tyres')}"><h2>${t('Tyres')}</h2>
+            ${fact(t('This set'), esc(ty.detail || '—'))}
+            ${ty.fittedDate ? fact(t('Fitted'), this.date(ty.fittedDate, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}
+            ${ty.kmLeft !== null && ty.kmLeft > 0 ? fact(t('Usual life left'), t('about {km} km', { km: this.num(Math.round(ty.kmLeft / 1000) * 1000) })) : ''}</section>` : '';
+
+        const wars = Storage.getActiveWarranties(car.id).map(w => {
+            const left = [];
+            if (w.warranty.daysRemaining !== null && w.warranty.daysRemaining !== undefined) left.push(t('{d} days', { d: w.warranty.daysRemaining }));
+            if (w.warranty.kmRemaining !== null && w.warranty.kmRemaining !== undefined) left.push(t('{km} km', { km: this.num(w.warranty.kmRemaining) }));
+            return fact(`<span dir="auto">${esc(w.bill.label || this.name(w.bill.serviceType))}</span>`, t('{left} left', { left: left.join(' ' + t('or') + ' ') }));
+        }).join('');
+
+        const bd = Storage.getCostBreakdown(car.id);
+        const year = String(new Date().getFullYear());
+        const paid = Storage.getServices(car.id).filter(s => (s.date || '').startsWith(year)).reduce((n, s) => n + Storage.getOwnCost(s), 0);
+        const ahead = Storage.getCostForecast(car.id, 6).total;
+        const backup = Storage.getBackupStatus();
+        const backedUp = backup.never ? t('Never backed up')
+            : backup.daysSinceBackup === 0 ? t('Backed up today') : t('Last backup {d} days ago', { d: backup.daysSinceBackup });
+        const climate = localStorage.getItem('autocare_climate') || 'normal';
+        const pick = (act, value, current, label) => `<button type="button" data-do="${act}" data-arg="${value}" aria-pressed="${value === current}">${label}</button>`;
+        const notif = typeof Notification === 'undefined' ? ''
+            : Notification.permission === 'granted' ? fact(t('Reminders'), t('On'))
+            : Notification.permission === 'denied' ? fact(t('Reminders'), t('Blocked in the phone\'s settings'))
+            : row('data-do="notify"', '', t('Reminders'), t('Get a notification when something is due'));
+
+        return `
+            <div class="head"><h1 class="title">${esc(car.make)} ${esc(car.model)}</h1></div>
+            <p class="lede">${[esc(car.year), proj.km ? t('{km} km', { km: this.num(proj.km) }) : ''].filter(Boolean).join(t(', '))}</p>
+            <section class="card" aria-label="${t('Schedule')}"><h2>${t('Schedule')}</h2>${sched}</section>
+            <section class="card" aria-label="${t('Documents')}"><h2>${t('Documents')}</h2>${docs}</section>
+            ${tyres}
+            ${wars ? `<section class="card" aria-label="${t('Warranties')}"><h2>${t('Warranties')}</h2>${wars}</section>` : ''}
+            <section class="card" aria-label="${t('Costs')}"><h2>${t('Costs')}</h2>
+                ${fact(t('Running cost'), bd ? `${bd.totalPerKm.toFixed(2)} <small>${t('SAR/km')}</small>` : '—')}
+                ${fact(t('Paid in {y}', { y: year }), this.money(paid))}
+                ${fact(t('Expected, next 6 months'), t('about {v}', { v: this.money(Math.round(ahead / 50) * 50) }))}
+            </section>
+            <section class="card" aria-label="${t('Settings')}"><h2>${t('Settings')}</h2>
+                <div class="fact"><span>${t('Language')}</span><div class="seg">${pick('lang', 'en', I18N.lang, 'English')}${pick('lang', 'ar', I18N.lang, 'العربية')}</div></div>
+                <div class="fact"><span>${t('Climate')}</span><div class="seg">${pick('climate', 'normal', climate, t('Normal'))}${pick('climate', 'severe', climate, t('Hot and dusty'))}</div></div>
+                ${row('data-do="backup"', '', t('Back up now'), backedUp)}
+                <label class="row"><span class="row-main"><strong>${t('Restore a backup')}</strong><span>${t('Choose a backup file from Files')}</span></span>
+                    <span class="chev">${this.icon('chev', 'flip')}</span><input type="file" accept=".json,application/json" data-import hidden></label>
+                ${notif}
+                <a class="row" href="classic.html"><span class="row-main"><strong>${t('Classic screens')}</strong><span>${t('Car details, fuel log, trip planner, deleted records')}</span></span>
+                    <span class="chev">${this.icon('chev', 'flip')}</span></a>
+            </section>`;
+    },
+
+    // A toast can carry one action, such as taking back a delete
+    toast(message, action) {
         const el = document.getElementById('toast');
-        el.textContent = message;
+        el.innerHTML = `<span>${esc(message)}</span>${action ? `<button type="button">${esc(action.label)}</button>` : ''}`;
+        if (action) el.querySelector('button').onclick = () => { el.classList.remove('show'); action.run(); };
+        el.classList.toggle('acts', !!action);
         el.classList.add('show');
         clearTimeout(this._toast);
-        this._toast = setTimeout(() => el.classList.remove('show'), 2600);
+        this._toast = setTimeout(() => el.classList.remove('show'), action ? 7000 : 2600);
     }
 };
 

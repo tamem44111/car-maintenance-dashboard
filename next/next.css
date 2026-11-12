@@ -25,6 +25,7 @@
     --sheet: #F2F2F7;
     --sheet-card: #FFFFFF;
     --sheet-line: #E3E3E8;
+    --seg-on: #FFFFFF;
     --rounded: ui-rounded, "SF Pro Rounded", -apple-system, system-ui, sans-serif;
 }
 
@@ -45,6 +46,7 @@
         --sheet: #1C1C1E;
         --sheet-card: #2C2C2E;
         --sheet-line: #3D3D41;
+        --seg-on: #636366;
     }
 }
 
@@ -165,7 +167,7 @@ body.locked { overflow: hidden; }
 #sheet { position: fixed; inset: 0; z-index: 20; display: none; }
 #sheet.open { display: block; }
 .scrim { position: absolute; inset: 0; background: rgba(0, 0, 0, .42); animation: fade .2s ease; }
-.sheet { --card: var(--sheet-card); --line: var(--sheet-line); position: absolute; inset-inline: 0; bottom: 0; max-width: 480px; margin: 0 auto; max-height: calc(100% - env(safe-area-inset-top, 0px) - 44px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--sheet); border-radius: 26px 26px 0 0; padding: 0 18px calc(env(safe-area-inset-bottom, 0px) + 22px); animation: rise .28s cubic-bezier(.2, .8, .2, 1); }
+.sheet { --card: var(--sheet-card); --line: var(--sheet-line); position: absolute; inset-inline: 0; bottom: var(--kb, 0px); max-width: 480px; margin: 0 auto; max-height: calc(100% - var(--kb, 0px) - env(safe-area-inset-top, 0px) - 44px); overflow-y: auto; overscroll-behavior: contain; -webkit-overflow-scrolling: touch; background: var(--sheet); border-radius: 26px 26px 0 0; padding: 0 18px calc(env(safe-area-inset-bottom, 0px) + 22px); animation: rise .28s cubic-bezier(.2, .8, .2, 1); }
 .sheet-head { position: sticky; top: 0; z-index: 1; display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; background: var(--sheet); padding: 20px 0 6px; }
 .sheet-head h2 { font-size: 22px; line-height: 1.2; font-weight: 700; letter-spacing: -0.015em; }
 .sheet-head p { margin-top: 2px; font-size: 15px; color: var(--dim); }
@@ -193,6 +195,82 @@ body.locked { overflow: hidden; }
 .sum + .sum { border-top: 1px solid var(--line); margin-inline-start: 16px; padding-inline-start: 0; }
 .sum strong { font: 700 17px/1.25 var(--rounded); font-variant-numeric: tabular-nums; }
 .quiet { display: block; width: 100%; margin-top: 14px; padding: 13px; border-radius: 16px; background: var(--card); color: var(--accent); font-size: 16px; font-weight: 600; text-align: center; }
+
+#sheet.still .sheet, #sheet.still .scrim { animation: none; }
+
+/* ── Forms ──
+   A form is a card of rows: what is asked on the leading side, the answer on the
+   other. Text is 17px so the phone does not zoom in when a field is tapped. */
+.field { display: flex; align-items: center; justify-content: space-between; gap: 14px; min-height: 52px; padding: 8px 16px; font-size: 16px; }
+.field + .field, .toggle + .toggle, .field + .toggle, .toggle + .field, .field + .sum, .fact + .fact, .fact + .row, .row + .fact, .row + label.row, label.row + .fact, .fact + a.row, label.row + .row, .row + a.row { border-top: 1px solid var(--line); margin-inline-start: 16px; padding-inline-start: 0; }
+.field + .field, .field + .toggle, .toggle + .field, .toggle + .toggle, .field + .sum, .fact + .row, .row + label.row, label.row + .row, .row + a.row, .fact + a.row { width: calc(100% - 16px); }
+.field > span:first-child { flex: none; max-width: 58%; }
+.field .in { display: flex; align-items: baseline; gap: 6px; flex: 1; min-width: 0; justify-content: flex-end; }
+.field input, .field textarea { font: inherit; font-size: 17px; color: var(--ink); background: none; border: 0; padding: 6px 0; min-width: 0; width: 100%; text-align: end; outline: none; -webkit-appearance: none; appearance: none; }
+.field input[type="date"] { width: auto; min-height: 34px; color: var(--accent); }
+.field input::placeholder, .field textarea::placeholder { color: var(--dim); opacity: .7; }
+.field .in small { flex: none; font-size: 15px; color: var(--dim); }
+.field:focus-within > span:first-child { color: var(--accent); }
+/* only the block padding changes, so a row after another keeps its inset rule */
+.field.tall, .field.stack { display: block; padding-block: 12px; }
+.field.tall > span:first-child, .field.stack > span:first-child { display: block; max-width: none; font-size: 14px; font-weight: 600; color: var(--dim); }
+.field.stack .seg { margin-top: 8px; }
+.field.stack .seg button { flex: 1; padding: 8px 6px; }
+.field.tall textarea { display: block; margin-top: 4px; text-align: start; resize: none; line-height: 1.4; }
+
+.toggle { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; min-height: 52px; padding: 8px 16px; font-size: 16px; }
+.toggle i { flex: none; width: 51px; height: 31px; border-radius: 999px; background: var(--line); position: relative; transition: background .18s ease; }
+.toggle i::after { content: ""; position: absolute; top: 2px; inset-inline-start: 2px; width: 27px; height: 27px; border-radius: 50%; background: #FFF; box-shadow: 0 2px 5px rgba(0, 0, 0, .22); transition: transform .18s ease; }
+.toggle[aria-checked="true"] i { background: var(--green); }
+.toggle[aria-checked="true"] i::after { transform: translateX(20px); }
+[dir="rtl"] .toggle[aria-checked="true"] i::after { transform: translateX(-20px); }
+
+.seg { display: flex; flex: none; background: var(--line); border-radius: 10px; padding: 2px; gap: 2px; }
+.seg button { font-size: 14.5px; font-weight: 500; padding: 6px 11px; border-radius: 8px; white-space: nowrap; text-align: center; }
+.seg button[aria-pressed="true"] { background: var(--seg-on); font-weight: 600; box-shadow: 0 1px 3px rgba(0, 0, 0, .14); }
+
+.group { margin: 18px 4px 0; font-size: 14px; font-weight: 600; color: var(--dim); }
+.picks { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+.chip.pick { font-size: 16px; padding: 10px 16px; }
+.chip.pick[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+
+.primary, .secondary { display: block; width: 100%; margin-top: 16px; padding: 15px; border-radius: 16px; font-size: 17px; font-weight: 600; text-align: center; text-decoration: none; }
+.primary { background: var(--accent); color: var(--on-accent); }
+.primary:disabled { opacity: .4; }
+.secondary { background: var(--card); color: var(--accent); }
+.pair { display: flex; gap: 10px; }
+.pair .secondary { flex: 0 0 34%; }
+.quiet.danger { color: var(--red); }
+.link { display: inline-block; margin-top: 8px; padding: 4px 0; color: var(--accent); font-size: 15px; font-weight: 600; }
+.hint { margin: 8px 16px 0; font-size: 14px; line-height: 1.35; color: var(--dim); min-height: 1px; }
+.hint:empty { display: none; }
+.warn { margin-top: 12px; padding: 12px 16px; border-radius: 16px; background: var(--card); color: var(--red); font-size: 15px; font-weight: 500; line-height: 1.35; }
+.say { margin-top: 10px; padding: 16px; border-radius: 22px; background: var(--card); font-size: 16px; line-height: 1.45; white-space: pre-line; }
+#log-total:empty { display: none; }
+
+.thumb-wrap { position: relative; flex: none; }
+.thumb-wrap .x { position: absolute; top: -7px; inset-inline-end: -7px; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; }
+.thumb-wrap .x svg { width: 12px; height: 12px; stroke-width: 2.6; }
+.thumb.add { display: grid; place-items: center; background: none; border: 1.5px dashed var(--dim); color: var(--accent); cursor: pointer; }
+
+/* ── Car ── */
+.fact { display: flex; justify-content: space-between; align-items: center; gap: 14px; padding: 13px 16px; font-size: 16px; }
+.fact > span:first-child { min-width: 0; }
+.fact strong { flex: none; max-width: 62%; font-weight: 600; text-align: end; }
+.fact strong small { font-weight: 400; color: var(--dim); font-size: 13px; }
+.sheet .fact strong > small { display: block; }
+.card h2 + .row, .card h2 + .fact, .card h2 + .toggle { margin-top: 2px; }
+a.row, label.row { text-decoration: none; cursor: pointer; }
+.nudge { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; margin-top: 10px; padding: 14px 16px; font-size: 15px; line-height: 1.35; }
+.nudge b { flex: none; color: var(--accent); font-weight: 600; }
+
+/* The backup sheet comes from the shared code with the classic screens' class names */
+.classic { margin-top: 10px; padding: 16px; border-radius: 22px; background: var(--card); font-size: 16px; line-height: 1.4; }
+.classic .imp-choices { display: grid; gap: 8px; margin-top: 14px; }
+.classic .btn { padding: 14px; border-radius: 14px; font-size: 16px; font-weight: 600; text-align: center; background: var(--line); color: var(--ink); }
+.classic .btn-primary { background: var(--accent); color: var(--on-accent); }
+.classic .field-note { display: block; font-size: 13.5px; color: var(--dim); margin-bottom: 6px; }
+.classic .imp-warn { margin-top: 10px; color: var(--red); font-weight: 500; }
 
 /* ── A receipt, full screen ── */
 #viewer { position: fixed; inset: 0; z-index: 30; display: none; background: #000; }
@@ -224,8 +302,12 @@ svg.back { transform: scaleX(-1); }
 /* ── Toast ── */
 #toast { z-index: 40; position: fixed; inset-inline: 0; bottom: calc(env(safe-area-inset-bottom, 0px) + 92px); margin: 0 auto; width: max-content; max-width: calc(100% - 36px); background: var(--ink); color: var(--bg); font-size: 14px; font-weight: 500; text-align: center; padding: 10px 16px; border-radius: 14px; opacity: 0; transform: translateY(8px); transition: opacity .18s ease, transform .18s ease; pointer-events: none; }
 #toast.show { opacity: 1; transform: none; }
+#toast.acts { display: flex; align-items: center; gap: 14px; }
+#toast.acts.show { pointer-events: auto; }
+#toast button { color: var(--bg); font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 
 @media (prefers-reduced-motion: reduce) {
     #toast { transition: none; }
     .sheet, .scrim { animation: none; }
+    .toggle i, .toggle i::after { transition: none; }
 }

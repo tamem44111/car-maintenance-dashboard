@@ -66,8 +66,10 @@ right call to state plainly.
 
 1. **Open `checks.html` and press Run.** It automates what used to be five manual steps:
    parsing, every page and every modal in both languages, the overflow sweep at 402px,
-   and the raw-`${...}` bug class. It runs the real app in a 402px iframe, and it
-   snapshots and restores `localStorage` so a run cannot eat his records.
+   and the raw-`${...}` bug class. It runs the real app in a 402px iframe: the classic
+   screens (`classic.html`) first, then the new design (`index.html`, the `[new]` checks),
+   driving its forms by tapping and typing. It snapshots and restores `localStorage`, and
+   leaves the receipt photos alone, so a run cannot eat his records.
    If `sw.js` changed, `node sw.check.js` too; the iframe can't reach the worker.
 2. **Add a check for whatever you just fixed**, so it cannot come back. That is the
    point of the suite; a fix with no check is half done.

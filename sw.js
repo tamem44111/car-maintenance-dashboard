@@ -1,7 +1,7 @@
-const CACHE = 'autocare-v46';
-const ASSETS = ['./', './index.html', './styles.css', './i18n.js', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png',
-    // the new design, previewed beside the current app; cached so it opens offline too
-    './next/', './next/next.css', './next/next.js'];
+const CACHE = 'autocare-v47';
+const ASSETS = ['./', './index.html', './classic.html', './styles.css', './i18n.js', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png',
+    // index.html is the new design; classic.html is the screens it replaced
+    './next/', './next/next.css', './next/next.js', './next/forms.js'];
 
 self.addEventListener('install', e => {
     e.waitUntil(caches.open(CACHE).then(c => c.addAll(ASSETS)));

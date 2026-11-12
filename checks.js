@@ -715,8 +715,8 @@ const Checks = {
         this.failures = []; this.warnings = []; this.passes = []; this._log = logEl;
         // A run that was cut short can leave the frame on the preview page
         let onApp = false;
-        try { onApp = iframe.contentWindow.eval('typeof App') === 'object'; } catch (e) {}
-        if (!onApp) await this._load(iframe, 'index.html');
+        try { onApp = iframe.contentWindow.eval("typeof App === 'object' && typeof App.renderDashboard") === 'function'; } catch (e) {}
+        if (!onApp) await this._load(iframe, 'classic.html');
         const W = iframe.contentWindow;
         const D = W.document;
 
@@ -763,18 +763,22 @@ const Checks = {
         return { passed: this.passes.length, failed: this.failures.length, warned: this.warnings.length };
     },
 
-    // The new design, previewed beside the current app (next/). It reads the same
-    // records through the same code, so it must show the same numbers in both
-    // languages, and it must be unable to change a single one of them.
+    // The new design (index.html). It reads and writes the same records through the
+    // same code as the classic screens, so it must show the same numbers in both
+    // languages, and what it saves must be what the classic form would have saved.
     async preview(iframe) {
         const store = window.localStorage;
         const dump = () => JSON.stringify(Object.keys(store).sort().map(k => [k, store.getItem(k)]));
-        const open = async lang => {
+        let W, D;
+        const open = async (lang, hash) => {
             store.setItem('autocare_lang', lang);
-            await this._load(iframe, 'next/index.html?t=' + Date.now());
-            return iframe.contentWindow;
+            await this._load(iframe, 'index.html?t=' + Date.now() + (hash ? '#' + hash : ''));
+            W = iframe.contentWindow; D = W.document;
+            // As for the classic screens: no photo is tidied away while the fixture is
+            // loaded, and a backup is built but not handed to the phone.
+            W.eval("Photos.remove = () => Promise.resolve(); Features._deliverBackup = () => Promise.resolve('download');");
         };
-        const wide = (W, root) => {
+        const wide = root => {
             const out = [];
             root.querySelectorAll('*').forEach(el => {
                 // the row of job chips scrolls sideways on purpose; the page must not
@@ -785,45 +789,183 @@ const Checks = {
             });
             return out;
         };
+        // anything left in English, apart from what the owner typed himself
+        const english = () => {
+            const gaps = [];
+            const walk = D.createTreeWalker(D.body, W.NodeFilter.SHOW_TEXT);
+            let n;
+            while ((n = walk.nextNode())) {
+                const txt = n.textContent.trim();
+                if (!txt || /[؀-ۿ]/.test(txt) || /^[~\d\s.,:%+\-\/()·—–×]*$|Ford|Taurus|^English$/.test(txt)) continue;
+                if (n.parentElement && (/SCRIPT|STYLE|TEXTAREA/.test(n.parentElement.tagName) || n.parentElement.closest('[dir="auto"]'))) continue;
+                gaps.push(txt.slice(0, 40));
+            }
+            return gaps;
+        };
+        const $ = sel => D.querySelector(sel);
+        const tap = sel => { const el = $(sel); if (!el) throw new Error('nothing to tap at ' + sel); el.click(); };
+        const type = (sel, value) => {
+            const el = $(sel);
+            if (!el) throw new Error('nothing to type into at ' + sel);
+            el.value = value;
+            el.dispatchEvent(new W.Event('input', { bubbles: true }));
+        };
+        const S = () => W.eval('Storage');
+        const records = () => S().getServices('test-car');
+        const car = () => S().getCars()[0];
+        const today = this.localDay(0);
+        const rows = () => [...D.querySelectorAll('.visit')];
+        const rowFor = day => $(`.visit[data-visit="${this.localDay(day)}"]`);
+        const sheet = () => $('.sheet');
+        const digits = el => parseInt((el ? el.textContent : '').replace(/[^\d]/g, ''), 10) || 0;
+        const yearTotals = () => [...D.querySelectorAll('.year h2 span + span')].reduce((n, el) => n + digits(el), 0);
+
         try {
             this.seed(window);
-            let W = await open('en'), D = W.document;
+            await open('en');
             const before = dump();
             const app = D.getElementById('app');
-            this.ok('[preview] the page draws', app.querySelectorAll('.card').length >= 2, app.innerText.slice(0, 120));
-            this.ok('[preview] it shows the odometer the app shows', app.innerText.includes('100,000'), app.innerText.slice(0, 80));
-            const first = D.querySelector('.row');
-            this.ok('[preview] the overdue air filter leads the list',
+            this.ok('[new] Home draws', app.querySelectorAll('.card').length >= 2, app.innerText.slice(0, 120));
+            this.ok('[new] it shows the odometer the classic screens show', app.innerText.includes('100,000'), app.innerText.slice(0, 80));
+            const first = $('.row');
+            this.ok('[new] the overdue air filter leads the list',
                 !!first && first.classList.contains('overdue') && /Air filter/.test(first.textContent), first && first.textContent);
-            this.ok('[preview] and is marked on the road', !!D.querySelector('.track .mark.overdue'));
-            const road = D.querySelector('.track').getBoundingClientRect();
-            this.ok('[preview] every marker sits on the road', [...D.querySelectorAll('.track .mark')].every(m => {
+            this.ok('[new] and is marked on the road', !!$('.track .mark.overdue'));
+            const road = $('.track').getBoundingClientRect();
+            this.ok('[new] every marker sits on the road', [...D.querySelectorAll('.track .mark')].every(m => {
                 const r = m.getBoundingClientRect();
                 return r.left >= road.left - 1 && r.right <= road.right + 9;
             }));
             // a job due by date sits on the road at an estimated distance, and must say so
-            const estimated = W.eval(`(() => {
-                const car = Storage.getCars()[0];
-                Storage.save = () => {};
-                const v = Next.visits([{ type: 'Rear Brake Pads', status: 'ok', days: 81, km: 10036, kmFirst: false, kmLeft: 56000, daysLeft: 81 }]);
-                return Next.roadHTML(v);
-            })()`);
-            this.ok('[preview] a distance worked out from a date says "about"', /about 10,000 km/.test(estimated), estimated.replace(/<[^>]+>/g, ' ').trim().slice(0, 80));
-            this.eq('[preview] no overflow at 402px', wide(W, D.body), []);
-            this.eq('[preview] no raw template literals', app.innerText.match(/\$\{[^}]*\}/g) || [], []);
-            this.eq('[preview] the way back leads to the current app', D.querySelector('a.round').getAttribute('href'), '../');
+            const estimated = W.eval(`Next.roadHTML(Next.visits([{ type: 'Rear Brake Pads', status: 'ok', days: 81, km: 10036, kmFirst: false, kmLeft: 56000, daysLeft: 81 }]))`);
+            this.ok('[new] a distance worked out from a date says "about"', /about 10,000 km/.test(estimated), estimated.replace(/<[^>]+>/g, ' ').trim().slice(0, 80));
+            this.eq('[new] no overflow on Home at 402px', wide(D.body), []);
+            this.eq('[new] no raw template literals', app.innerText.match(/\$\{[^}]*\}/g) || [], []);
 
-            // press everything, then try to write directly
-            D.querySelectorAll('button').forEach(b => b.click());
-            W.localStorage.setItem('autocare_probe', '1');
-            W.localStorage.removeItem('autocare_data');
-            W.eval("Storage.addService({ carId: 'test-car', type: 'Battery', date: '2026-01-01', cost: '1' })");
-            this.eq('[preview] nothing it does can change the records', dump(), before);
-            this.ok('[preview] a tap says it is a preview', D.getElementById('toast').textContent.length > 0);
+            // looking is not changing: every screen and sheet opened, nothing saved
+            tap('[data-go="history"]'); tap('.visit'); tap('[data-close="sheet"]');
+            tap('[data-go="car"]');
+            this.ok('[new] Car lists the schedule and the documents',
+                D.querySelectorAll('[data-do="job"]').length >= 10 && D.querySelectorAll('[data-do="doc"]').length === 3,
+                app.innerText.slice(0, 160));
+            this.eq('[new] no overflow on Car', wide(D.body), []);
+            tap('[data-do="job"][data-arg="Air Filter"]'); tap('[data-do="every"]');
+            this.eq('[new] no overflow in a schedule sheet', wide(D.getElementById('sheet')), []);
+            tap('[data-close="sheet"]');
+            tap('[data-do="doc"]'); tap('[data-close="sheet"]');
+            tap('[data-go="home"]'); tap('[data-do="odo"]'); tap('[data-close="sheet"]');
+            tap('.plus'); tap('[data-close="sheet"]');
+            this.eq('[new] looking around changes nothing', dump(), before);
+
+            // ── Logging: three steps from the overdue row on Home ──
+            const n0 = records().length;
+            tap('.row.overdue');
+            this.eq('[new] Log starts with the job that was tapped', [...D.querySelectorAll('.pick[aria-pressed="true"]')].map(b => b.textContent), ['Air filter']);
+            this.eq('[new] no overflow in step 1', wide(D.getElementById('sheet')), []);
+            tap('[data-do="logNext"]');
+            this.eq('[new] step 2 offers today', $('[data-f="date"]').value, today);
+            type('[data-f="km"]', '100500');
+            this.eq('[new] no overflow in step 2', wide(D.getElementById('sheet')), []);
+            tap('[data-do="logNext"]');
+            type('[data-f="cost:Air Filter"]', '150');
+            this.ok('[new] the total follows the typing', /150 SAR/.test($('#log-total').textContent), $('#log-total').textContent);
+            this.eq('[new] no overflow in step 3', wide(D.getElementById('sheet')), []);
+            tap('[data-do="saveLog"]');
+            const air = records().slice(n0)[0] || {};
+            this.eq('[new] it saves one record with what was typed',
+                [records().length - n0, air.type, air.date, air.mileage, air.cost, (air.bills || []).length],
+                [1, 'Air Filter', today, '100500', '150', 0]);
+            this.eq('[new] the reading becomes the car\'s odometer', car().mileage, '100500');
+            const due = S().getReminders('test-car').find(r => r.type === 'Air Filter' && !r.completed && r.autoCreated);
+            this.eq('[new] and the next one is counted from it', due && due.dueMileage, '115500');
+            this.ok('[new] the list no longer shows it overdue', !$('.row.overdue'), ($('.row') || {}).textContent);
+            this.ok('[new] the sheet closes and says so', !sheet() && /Saved/.test($('#toast').textContent), $('#toast').textContent);
+
+            // the same job again, same day, same reading
+            tap('.plus'); tap('.pick[data-arg="Air Filter"]'); tap('[data-do="logNext"]');
+            type('[data-f="km"]', '100500'); tap('[data-do="logNext"]'); tap('[data-do="saveLog"]');
+            this.ok('[new] a second copy is stopped and explained',
+                records().length === n0 + 1 && !!$('.warn') && /Save anyway/.test($('[data-do="saveLog"]').textContent),
+                ($('.warn') || {}).textContent);
+            tap('[data-close="sheet"]');
+
+            // oil with a new interval, a pad measurement, and an inspection, in one visit
+            tap('.plus');
+            ['Oil Change', 'Front Brake Pads', 'Periodic Inspection'].forEach(ty => tap(`.pick[data-arg="${ty}"]`));
+            tap('[data-do="logNext"]'); type('[data-f="km"]', '100600'); tap('[data-do="logNext"]');
+            this.eq('[new] each job asks only what it needs',
+                [!!$('[data-arg="oil=10000"]'), !!$('[data-f="pad:Front Brake Pads"]'), !!$('[data-arg="inspResult=fail"]'), !!$('[data-f="inspExpiry"]')],
+                [true, true, true, true]);
+            this.eq('[new] no overflow in a full step 3', wide(D.getElementById('sheet')), []);
+            tap('[data-arg="oil=10000"]');
+            type('[data-f="cost:Oil Change"]', '200'); type('[data-f="pad:Front Brake Pads"]', '7'); type('[data-f="shop"]', 'Corner shop');
+            tap('[data-do="saveLog"]');
+            const byType = ty => records().find(s => s.type === ty && s.mileage === '100600') || {};
+            const oil = byType('Oil Change');
+            this.eq('[new] the oil choice is saved and becomes the car\'s interval',
+                [oil.oilInterval, (W.eval('Recommendations').getCustom()['test-car']['Oil Change'] || {}).km], ['10000', 10000]);
+            this.eq('[new] a shop name turns the cost into a bill', (oil.bills || []).map(b => [b.vendor, b.amount]), [['Corner shop', '200']]);
+            this.eq('[new] the pad measurement is kept', byType('Front Brake Pads').padThickness, '7');
+            this.eq('[new] a passed inspection sets the certificate date', car().fahesExpiry, W.eval('Features').certificateExpiry(today));
+            const oilDue = S().getReminders('test-car').find(r => r.type === 'Oil Change' && !r.completed && r.autoCreated);
+            this.eq('[new] the next oil change is 10,000 km on', oilDue && oilDue.dueMileage, '110600');
+
+            // ── Editing and deleting, from History ──
+            tap('[data-go="history"]');
+            tap(`.visit[data-visit="${today}"]`);
+            this.eq('[new] the day\'s four jobs are one visit', sheet().querySelectorAll('.job').length, 4);
+            tap(`[data-do="edit"][data-arg="${air.id}"]`);
+            this.eq('[new] no overflow in the edit sheet', wide(D.getElementById('sheet')), []);
+            type('[data-f="cost"]', '175'); tap('[data-arg="accident"]'); tap('[data-arg="insured"]'); tap('[data-do="saveEdit"]');
+            const air2 = records().find(s => s.id === air.id);
+            this.eq('[new] an edit saves the cost and who paid', [air2.cost, air2.accident, air2.insurancePaid, air2.mileage], ['175', true, true, '100500']);
+            this.ok('[new] and returns to the visit', !!sheet() && sheet().querySelectorAll('.job').length === 4);
+            tap(`[data-do="edit"][data-arg="${air.id}"]`); tap('[data-do="delete"]');
+            this.ok('[new] deleting asks for a second tap', records().some(s => s.id === air.id) && /again/.test($('[data-do="delete"]').textContent));
+            tap('[data-do="delete"]');
+            this.ok('[new] the second tap deletes', !records().some(s => s.id === air.id));
+            tap('#toast button');
+            this.ok('[new] Undo brings it back', records().some(s => s.id === air.id));
+
+            // ── Odometer, documents, intervals ──
+            tap('[data-go="home"]'); tap('[data-do="odo"]');
+            type('[data-f="km"]', '99000'); tap('[data-do="saveOdo"]');
+            this.ok('[new] a reading lower than the last is questioned', car().mileage === '100600' && !!$('.warn'), ($('.warn') || {}).textContent);
+            type('[data-f="km"]', '100900'); tap('[data-do="saveOdo"]');
+            this.eq('[new] a new reading is saved', [car().mileage, /100,900/.test($('.odo').textContent)], ['100900', true]);
+
+            tap('[data-go="car"]'); tap('[data-do="doc"][data-arg="insuranceExpiry"]');
+            type('[data-f="date"]', this.localDay(5)); tap('[data-do="saveDoc"]');
+            this.ok('[new] a document date is saved and read back', car().insuranceExpiry === this.localDay(5) && !!$('[data-do="doc"].overdue'), car().insuranceExpiry);
+
+            tap('[data-do="job"][data-arg="Cabin Air Filter"]'); tap('[data-do="every"]');
+            type('[data-f="ikm"]', '20000'); type('[data-f="imonths"]', '18'); tap('[data-do="saveEvery"]');
+            const own = () => (W.eval('Recommendations').getCustom()['test-car'] || {})['Cabin Air Filter'];
+            this.eq('[new] an interval can be set by the owner', own() && [own().km, own().months], [20000, 18]);
+            tap('[data-do="job"][data-arg="Cabin Air Filter"]'); tap('[data-do="every"]'); tap('[data-do="resetEvery"]');
+            this.ok('[new] and handed back to the maker\'s schedule', !own());
+
+            // ── Backup, through the code the classic screens use ──
+            tap('[data-do="backup"]');
+            await new Promise(r => setTimeout(r, 400));
+            this.ok('[new] a backup reports what it holds, in a sheet', !!$('.say') && /service record/.test($('.say').textContent) && !!store.getItem('autocare_lastBackup'),
+                ($('.say') || {}).textContent);
+            tap('[data-close="sheet"]');
+            W.eval("Features._pendingImport = JSON.parse(localStorage.getItem('autocare_data')); Features._showImportChoice(Features._pendingImport);");
+            this.ok('[new] restoring asks replace or add, in a sheet', !!$('#imp-replace') && !!$('#imp-merge'), sheet() && sheet().innerText.slice(0, 80));
+            this.eq('[new] no overflow in the restore sheet', wide(D.getElementById('sheet')), []);
+            tap('#imp-merge');
+            await new Promise(r => setTimeout(r, 200));
+            this.ok('[new] and says when it is done', !!$('.say') && /Import complete/.test($('.say').textContent), ($('.say') || {}).textContent);
+            tap('[data-close="sheet"]');
+
+            tap('[data-do="lang"][data-arg="ar"]');
+            this.eq('[new] the language switch mirrors the page and is remembered', [D.documentElement.getAttribute('dir'), store.getItem('autocare_lang')], ['rtl', 'ar']);
 
             // ── History: the same records as a logbook, one row per trip to the workshop ──
             // Two jobs on one day, a check where nothing was replaced, and an accident
             // repair paid by insurance whose two bills share one photographed invoice.
+            this.seed(window);
             const data = JSON.parse(store.getItem('autocare_data'));
             data.services.push(
                 { id: 'h-brk', carId: 'test-car', type: 'Brake Inspection', date: this.localDay(30), mileage: '96700', cost: '' },
@@ -833,88 +975,75 @@ const Checks = {
                     bills: [{ id: 'b1', kind: 'Parts', label: 'Struts', vendor: 'Shop', amount: '900', photoIds: ['ph-x'] },
                         { id: 'b2', kind: 'Labour', label: 'Fitting', amount: '100.25', photoIds: ['ph-x'] }] });
             store.setItem('autocare_data', JSON.stringify(data));
-            const openHistory = async lang => {
-                store.setItem('autocare_lang', lang);
-                await this._load(iframe, 'next/index.html?t=' + Date.now() + '#history');
-                return iframe.contentWindow;
-            };
-            const rows = () => [...D.querySelectorAll('.visit')];
-            const rowFor = day => D.querySelector(`.visit[data-visit="${this.localDay(day)}"]`);
-            const sheet = () => D.querySelector('.sheet');
-            const digits = el => parseInt((el ? el.textContent : '').replace(/[^\d]/g, ''), 10) || 0;
-            const yearTotals = () => [...D.querySelectorAll('.year h2 span + span')].reduce((n, el) => n + digits(el), 0);
-            // anything left in English, apart from what the owner typed himself
-            const english = () => {
-                const gaps = [];
-                const walk = D.createTreeWalker(D.body, W.NodeFilter.SHOW_TEXT);
-                let n;
-                while ((n = walk.nextNode())) {
-                    const txt = n.textContent.trim();
-                    if (!txt || /[؀-ۿ]/.test(txt) || /^[~\d\s.,:%+\-\/()·—–×]*$|Ford|Taurus/.test(txt)) continue;
-                    if (n.parentElement && (/SCRIPT|STYLE/.test(n.parentElement.tagName) || n.parentElement.closest('[dir="auto"]'))) continue;
-                    gaps.push(txt.slice(0, 40));
-                }
-                return gaps;
-            };
 
-            W = await openHistory('en'); D = W.document;
-            const logbook = dump();
-            this.eq('[preview] History has one row for each day of work', rows().length, 4);
-            this.ok('[preview] jobs done on the same day are one visit', /Oil change and brake check/.test(rowFor(30).textContent), rowFor(30).textContent);
-            this.eq('[preview] the year totals are what the owner paid', yearTotals(), 320);
+            await open('en', 'history');
+            this.eq('[new] History has one row for each day of work', rows().length, 4);
+            this.ok('[new] jobs done on the same day are one visit', /Oil change and brake check/.test(rowFor(30).textContent), rowFor(30).textContent);
+            this.eq('[new] the year totals are what the owner paid', yearTotals(), 320);
             const acc = rowFor(20);
-            this.ok('[preview] insurance money is shown, not counted',
+            this.ok('[new] insurance money is shown, not counted',
                 /insurance paid 1,000 SAR/.test(acc.textContent) && !acc.querySelector('.cost'), acc.textContent);
-            this.ok('[preview] a photo on two bills is one receipt', /1 receipt(?!s)/.test(acc.textContent), acc.textContent);
-            this.ok('[preview] a check says nothing was replaced', /checked only/.test(rowFor(60).textContent), rowFor(60).textContent);
+            this.ok('[new] a photo on two bills is one receipt', /1 receipt(?!s)/.test(acc.textContent), acc.textContent);
+            this.ok('[new] a check says nothing was replaced', /checked only/.test(rowFor(60).textContent), rowFor(60).textContent);
 
-            D.querySelector('.chip[data-filter="Oil Change"]').click();
-            this.eq('[preview] picking a job narrows the list to it', rows().map(r => r.querySelector('strong').textContent), ['Oil change']);
-            this.eq('[preview] and totals that job alone', yearTotals(), 200);
-            D.querySelector('.chip[data-filter=""]').click();
-            this.eq('[preview] All brings every visit back', rows().length, 4);
+            tap('.chip[data-filter="Oil Change"]');
+            this.eq('[new] picking a job narrows the list to it', rows().map(r => r.querySelector('strong').textContent), ['Oil change']);
+            this.eq('[new] and totals that job alone', yearTotals(), 200);
+            tap('.chip[data-filter=""]');
+            this.eq('[new] All brings every visit back', rows().length, 4);
 
             rowFor(30).click();
-            this.eq('[preview] a visit opens with every job in it', sheet() ? sheet().querySelectorAll('.job').length : 0, 2);
-            this.eq('[preview] no overflow in an open visit', wide(W, D.getElementById('sheet')), []);
+            this.eq('[new] a visit opens with every job in it', sheet() ? sheet().querySelectorAll('.job').length : 0, 2);
+            this.eq('[new] no overflow in an open visit', wide(D.getElementById('sheet')), []);
             D.dispatchEvent(new W.KeyboardEvent('keydown', { key: 'Escape' }));
-            this.ok('[preview] Escape closes it', !sheet());
+            this.ok('[new] Escape closes it', !sheet());
             rowFor(20).click();
             const sums = sheet().querySelector('.sums').textContent.replace(/\s+/g, ' ');
-            this.ok('[preview] an insured repair shows who paid what',
+            this.ok('[new] an insured repair shows who paid what',
                 /Insurance paid\s*1,000\.25 SAR/.test(sums) && /You paid\s*0 SAR/.test(sums), sums);
-            this.eq('[preview] and shows its receipt once', sheet().querySelectorAll('.thumb').length, 1);
-            D.querySelectorAll('#sheet button').forEach(b => b.click());
-            W.eval('Next.closePhoto(); Next.closeSheet();');
-            this.eq('[preview] no overflow in History', wide(W, D.body), []);
-            this.ok('[preview] the chips scroll inside their row, not the page',
-                D.documentElement.scrollWidth <= W.innerWidth + 1 && D.querySelector('.chips').scrollWidth > 0,
+            this.eq('[new] and shows its receipt once', sheet().querySelectorAll('.thumb').length, 1);
+            tap('[data-close="sheet"]');
+            this.eq('[new] no overflow in History', wide(D.body), []);
+            this.ok('[new] the chips scroll inside their row, not the page',
+                D.documentElement.scrollWidth <= W.innerWidth + 1 && $('.chips').scrollWidth > 0,
                 D.documentElement.scrollWidth + ' > ' + W.innerWidth);
-            D.querySelectorAll('button').forEach(b => b.click());
-            this.eq('[preview] History cannot change the records either', dump(), logbook);
-            const stored = await W.eval("Photos.put('ph-probe', 'data:,x').then(() => Photos.remove('ph-x')).then(() => Photos.keys())");
-            this.ok('[preview] nor can it add or remove a receipt photo', !stored.includes('ph-probe'), stored.join(', '));
 
-            W = await openHistory('ar'); D = W.document;
-            this.ok('[preview] Arabic counts take the right form of the noun',
-                /4 زيارات/.test(D.querySelector('.lede').textContent) && /فاتورة واحدة/.test(rowFor(20).textContent),
-                D.querySelector('.lede').textContent + ' / ' + rowFor(20).textContent);
-            rowFor(20).click();
-            this.eq('[preview] History leaves nothing in English', english(), []);
-            this.eq('[preview] no overflow in History in Arabic', wide(W, D.body), []);
-            this.ok('[preview] nor does the page scroll sideways in Arabic', D.documentElement.scrollWidth <= W.innerWidth + 1,
+            // ── Arabic: every screen and every sheet ──
+            await open('ar', 'history');
+            this.ok('[new] Arabic counts take the right form of the noun',
+                /4 زيارات/.test($('.lede').textContent) && /فاتورة واحدة/.test(rowFor(20).textContent),
+                $('.lede').textContent + ' / ' + rowFor(20).textContent);
+            const arabic = where => {
+                this.eq(`[new] ${where}: nothing left in English`, english(), []);
+                this.eq(`[new] ${where}: no overflow in Arabic`, wide(D.body), []);
+            };
+            rowFor(20).click(); arabic('a visit');
+            tap('[data-do="edit"]'); arabic('editing a record');
+            tap('[data-close="sheet"]');
+            this.ok('[new] the page does not scroll sideways in Arabic', D.documentElement.scrollWidth <= W.innerWidth + 1,
                 D.documentElement.scrollWidth + ' > ' + W.innerWidth);
-            W.eval('Next.closeSheet();');
-
-            W = await open('ar'); D = W.document;
-            this.eq('[preview] Arabic mirrors the page', D.documentElement.getAttribute('dir'), 'rtl');
-            this.eq('[preview] nothing is left in English', english(), []);
-            this.eq('[preview] no overflow at 402px in Arabic', wide(W, D.body), []);
+            tap('[data-go="home"]');
+            this.eq('[new] Arabic mirrors the page', D.documentElement.getAttribute('dir'), 'rtl');
+            arabic('Home');
+            tap('[data-do="odo"]'); tap('[data-do="saveOdo"]'); arabic('the odometer sheet'); tap('[data-close="sheet"]');
+            tap('.plus'); arabic('logging, step 1');
+            ['Oil Change', 'Front Brake Pads', 'Periodic Inspection'].forEach(ty => tap(`.pick[data-arg="${ty}"]`));
+            tap('[data-do="logNext"]'); tap('[data-arg="accident"]'); arabic('logging, step 2');
+            tap('[data-do="logNext"]'); arabic('logging, step 3');
+            tap('[data-close="sheet"]');
+            tap('[data-go="car"]'); arabic('Car');
+            // an empty distance is refused, so the sheet stays open with its warning showing
+            tap('[data-do="job"][data-arg="Air Filter"]'); tap('[data-do="every"]'); type('[data-f="ikm"]', ''); tap('[data-do="saveEvery"]');
+            this.ok('[new] an interval with no distance is refused', !!$('.warn'));
+            arabic('a schedule sheet');
+            tap('[data-close="sheet"]');
+            tap('[data-do="doc"][data-arg="fahesExpiry"]'); arabic('a document sheet');
+            tap('[data-close="sheet"]');
         } catch (e) {
-            this.failures.push({ name: 'the preview checks threw', detail: e.message });
+            this.failures.push({ name: 'the new design checks threw', detail: e.message + '\n' + (e.stack || '').split('\n')[1] });
         }
         store.setItem('autocare_lang', 'en');
-        await this._load(iframe, 'index.html');
+        await this._load(iframe, 'classic.html');
     },
 
     // Everything here was found by running the owner's real backup through the app
@@ -1270,7 +1399,7 @@ const Checks = {
         await T('the way in to the new design', async () => {
             App.navigate('dashboard');
             const link = D.querySelector('#page-dashboard .next-banner');
-            this.eq('the dashboard links to the preview', link && link.getAttribute('href'), 'next/');
+            this.eq('the classic screens lead back to the new design', link && link.getAttribute('href'), './');
         });
 
         // -- speed --
