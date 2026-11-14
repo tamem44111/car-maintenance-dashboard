@@ -89,9 +89,11 @@ const Features = {
     // that first. Falls back to a download when sharing is unavailable, or when the
     // tap's user activation has expired while the receipt photos were being read.
     // Resolves to 'share' | 'download', or null if the owner cancelled.
-    _deliverBackup(json, name) {
+    _deliverBackup(json, name) { return this._deliverFile(json, name, 'application/json', 'AutoCare backup'); },
+
+    _deliverFile(json, name, mime, title) {
         const download = () => {
-            const url = URL.createObjectURL(new Blob([json], { type: 'application/json' }));
+            const url = URL.createObjectURL(new Blob([json], { type: mime }));
             const a = document.createElement('a');
             a.href = url;
             a.download = name;
@@ -101,10 +103,10 @@ const Features = {
             return 'download';
         };
         let file = null;
-        try { file = new File([json], name, { type: 'application/json' }); } catch (e) { file = null; }
+        try { file = new File([json], name, { type: mime }); } catch (e) { file = null; }
         const canShare = !!(file && navigator.canShare && navigator.canShare({ files: [file] }) && navigator.share);
         if (!canShare) return Promise.resolve(download());
-        return navigator.share({ files: [file], title: 'AutoCare backup' })
+        return navigator.share({ files: [file], title })
             .then(() => 'share')
             .catch(err => (err && err.name === 'AbortError') ? null : download());
     },
@@ -449,15 +451,18 @@ const Features = {
             Recommendations.saveCustom(data.carId,'Oil Change',parseInt(interval),
                 (mfr&&mfr.months)||6,t('Your oil choice: {label}',{label:t(lbl[interval]||'Regular')}));
         }
-        if(data.mileage&&car){
+        // Saved without a reading, the reminder still exists; the schedule works out
+        // its distance from the readings around that day (syncAutoReminders).
+        if(car){
             const rec=Recommendations.getEffective(car,'Oil Change');
-            const next=parseInt(data.mileage)+rec.km;
+            const base=parseInt(data.mileage)||0;
+            const next=base?base+rec.km:0;
             Storage.getReminders(data.carId).filter(r=>r.type==='Oil Change'&&!r.completed&&r.autoCreated).forEach(r=>Storage.dropReminder(r.id));
             // The time limit, like every other reminder. The km limit is its own field;
             // an estimate of when that will be reached belongs on screen, not in a
             // date that later reads as a deadline.
             const due=new Date(data.date); due.setMonth(due.getMonth()+(rec.months||6));
-            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:due.toISOString().split('T')[0],dueMileage:next.toString(),notes:`Auto: next oil change at ${next.toLocaleString()} km`,completed:false,autoCreated:true});
+            Storage.addReminder({carId:data.carId,type:'Oil Change',dueDate:due.toISOString().split('T')[0],dueMileage:next?next.toString():'',notes:next?`Auto: next oil change at ${next.toLocaleString()} km`:'Auto: next oil change',completed:false,autoCreated:true});
         }
     },
 
@@ -473,7 +478,8 @@ const Features = {
 
     // Saves one trip to the workshop: one record per job, each with its own cost.
     // visit = { carId, date, mileage, notes, accident, insurancePaid, shop, photoIds,
-    //           jobs: [{ type, cost, checkOnly, padThickness, oilInterval, insp }] }
+    //           jobs: [{ type, cost, checkOnly, padThickness, oilInterval, insp,
+    //                    warrantyMonths, warrantyKm }] }
     logVisit(visit) {
         const car = Storage.getCars().find(c => c.id === visit.carId);
         if (!car || !visit.jobs || !visit.jobs.length) return [];
@@ -489,11 +495,14 @@ const Features = {
             // invoice covers every job it priced, so each of them points at it; with
             // nothing priced, the first job keeps the receipt.
             const holdsReceipt = photoIds.length > 0 && (amount !== '' || (!anyPriced && i === 0));
-            const bills = ((amount && visit.shop) || holdsReceipt) ? [{
+            // A warranty is kept on a bill too, so a part with one gets a bill
+            const warranty = { warrantyMonths: String(j.warrantyMonths || ''), warrantyKm: String(j.warrantyKm || '') };
+            const covered = !!(warranty.warrantyMonths || warranty.warrantyKm);
+            const bills = ((amount && visit.shop) || holdsReceipt || covered) ? [{
                 id: 'bl_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6),
                 kind: 'Other', label: '', vendor: visit.shop || '',
                 photoIds: holdsReceipt ? photoIds.slice() : [],
-                amount, warrantyMonths: '', warrantyKm: '', startKm: mileage, date: visit.date
+                amount, ...warranty, startKm: mileage, date: visit.date
             }] : [];
             const data = {
                 carId: car.id, type: j.type, date: visit.date, mileage,
@@ -505,12 +514,13 @@ const Features = {
             };
             if (!data.checkOnly) {
                 if (j.type === 'Oil Change') this.oilFollowUp(data, j.oilInterval || null);
-                else if (mileage) Recommendations.createReminderFromService(car, j.type, mileage, data.date);
+                else Recommendations.createReminderFromService(car, j.type, mileage, data.date);
             }
             const saved = Storage.addService(data);
             if (Recommendations.isInspectionType(j.type)) this.inspectionFollowUp(car.id, data, data.date, null);
             return saved.id;
         });
+        if (photoIds.length) Storage.markReceiptAdded();
         this.cleanupPhotos();
         return ids;
     },
@@ -520,7 +530,7 @@ const Features = {
         const car = Storage.getCars().find(c => c.id === data.carId);
         if (!data.checkOnly) {
             if (data.type === 'Oil Change') this.oilFollowUp(data, oilInterval || null, id);
-            else if (data.mileage && car) Recommendations.createReminderFromService(car, data.type, data.mileage, data.date, id);
+            else if (car) Recommendations.createReminderFromService(car, data.type, data.mileage, data.date, id);
         }
         Storage.updateService(id, data);
         if (Recommendations.isInspectionType(data.type)) this.inspectionFollowUp(data.carId, data, data.date, id);
@@ -1578,6 +1588,75 @@ const Features = {
         const list = document.getElementById('trash-list');
         if (list) list.innerHTML = this.renderTrash();
         App.renderPage(App.currentPage);
+    },
+
+    // ── Calendar ──
+    // The app can only raise a notification while it is open, and a date that
+    // matters is exactly the one that passes while it is closed. A calendar file
+    // puts the same dates in the phone's own calendar, which alerts by itself.
+    // Documents have a fixed day. A job's day is today's estimate and moves with
+    // the driving, so its entry says so; adding the file again brings the entries
+    // up to date instead of doubling them, because each keeps the same identity.
+    calendarEvents(car, nameOf) {
+        const job = nameOf || (type => t(type));
+        const today = Storage.today();
+        const name = [car.make, car.model].filter(Boolean).join(' ');
+        const out = [];
+        this.DOCS.forEach(d => {
+            const date = car[d.key];
+            if (!date || date < today) return;
+            out.push({
+                uid: `autocare-${car.id}-${d.key}`, date, alarms: [30, 7, 0],
+                title: t('{doc} expires ({car})', { doc: t(d.label), car: name }),
+                note: t('From AutoCare. Renew it before this day.')
+            });
+        });
+        Recommendations.ALL_TYPES.forEach(type => {
+            const st = Recommendations.getMaintenanceStatus(car, type);
+            if (!st || st.status === 'unknown' || !st.dueDate || st.dueDate < today) return;
+            out.push({
+                uid: `autocare-${car.id}-${type.replace(/\s+/g, '-')}`, date: st.dueDate, alarms: [7, 0],
+                title: t('{job} due ({car})', { job: job(type), car: name }),
+                note: t('Estimated by AutoCare on {d} from how you drive. Open the app for the current date.', { d: today })
+            });
+        });
+        return out.sort((a, b) => a.date.localeCompare(b.date));
+    },
+
+    buildCalendar(car, nameOf) {
+        const esc = v => String(v).replace(/\\/g, '\\\\').replace(/;/g, '\\;').replace(/,/g, '\\,').replace(/\r?\n/g, '\\n');
+        const day = iso => iso.replace(/-/g, '');
+        const next = iso => { const d = new Date(iso); d.setUTCDate(d.getUTCDate() + 1); return d.toISOString().slice(0, 10); };
+        const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\.\d+/, '');
+        const seq = Math.floor(Date.now() / 60000) % 2000000000;
+        // an all-day entry starts at midnight, so "N days before, at nine in the morning"
+        const at = n => (n === 0 ? 'PT9H' : `-P${n - 1}DT15H`);
+        const lines = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//AutoCare//AutoCare//EN', 'CALSCALE:GREGORIAN', 'METHOD:PUBLISH'];
+        this.calendarEvents(car, nameOf).forEach(e => {
+            lines.push('BEGIN:VEVENT', `UID:${e.uid}@autocare`, `DTSTAMP:${stamp}`, `SEQUENCE:${seq}`,
+                `DTSTART;VALUE=DATE:${day(e.date)}`, `DTEND;VALUE=DATE:${day(next(e.date))}`,
+                `SUMMARY:${esc(e.title)}`, `DESCRIPTION:${esc(e.note)}`, 'TRANSP:TRANSPARENT');
+            e.alarms.forEach(n => lines.push('BEGIN:VALARM', 'ACTION:DISPLAY', `DESCRIPTION:${esc(e.title)}`, `TRIGGER:${at(n)}`, 'END:VALARM'));
+            lines.push('END:VEVENT');
+        });
+        lines.push('END:VCALENDAR');
+        // A line is at most 75 bytes; a longer one continues on the next, after a space.
+        // Counted in bytes, and never cut inside a character: Arabic takes two each.
+        const size = ch => (ch.codePointAt(0) < 0x80 ? 1 : ch.codePointAt(0) < 0x800 ? 2 : ch.codePointAt(0) < 0x10000 ? 3 : 4);
+        const fold = line => {
+            let out = '', used = 0;
+            for (const ch of line) {
+                if (used + size(ch) > 73) { out += '\r\n '; used = 1; }
+                out += ch; used += size(ch);
+            }
+            return out;
+        };
+        return lines.map(fold).join('\r\n') + '\r\n';
+    },
+
+    // Resolves to 'share' | 'download', or null if the owner backed out
+    shareCalendar(car, nameOf) {
+        return this._deliverFile(this.buildCalendar(car, nameOf), 'autocare.ics', 'text/calendar', 'AutoCare');
     },
 
     // ── Notifications ──

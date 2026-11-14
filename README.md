@@ -133,6 +133,55 @@ to, and with the fixture loaded that is every photo there is: a run used to dele
 Tidying is now off during a run, and the photo store is compared at the end, repaired, and
 reported as a failure if anything went missing.
 
+**Measured pads outrank the interval.** A fixed interval is a guess at how fast pads wear; a
+thickness someone measured is what they have done. `Recommendations.padEstimate` takes the
+latest measurement of the set on the car and works the wear out from an earlier measurement
+of the same set, or failing that from the day it was fitted, taking a new set as 12 mm
+(`PAD_NEW_MM`, the top of the usual 10 to 12, so the estimate errs early). By distance when
+both points have an odometer, otherwise by time. `getMaintenanceStatus` then reports that
+date instead of the interval's. Three guards keep an estimate from being read as a fact:
+pads at 3 mm are due whatever the dates say, a worked-out date that has passed asks for a
+new measurement instead of calling the pads finished, and so does a measurement more than a
+year old. Logging a brake check asks for both thicknesses, because that is when a shop
+measures them; a figure typed there is saved as a check-only record of that axle. On this
+car the first two measurements were a shop's "fraction of life left" turned into mm, so they
+are soft: the next real measurement is worth more than both.
+
+**A record without a reading is worked out, never filled in.** The log form used to open on
+today's projected odometer and save it as if it had been read off the dashboard, which made
+the projection confirm itself and produced readings that later contradicted real ones. The
+field now starts empty. `Storage.kmOn(carId, date)` answers what the odometer was that day:
+the reading itself when anything was read then, an interpolation between the readings either
+side when one is within 45 days, the last reading carried forward at the driving rate when
+the day is after it, and null otherwise. Nothing is stored, so an estimate cannot be mistaken
+for a reading and it improves as readings are added around it. `getMaintenanceStatus` passes
+`kmEstimated` on, and the screens say "about".
+
+**Readings that cannot all be true are raised, not resolved.** An odometer never runs
+backwards, so a later, lower reading means one of the two is wrong, and the app cannot know
+which. `Storage.getReadingConflicts` names the pair and the owner opens the wrong one; the
+edit sheet shows what the other readings put that day at. One too-high reading contradicts
+everything after it, so it is named once. A difference under 100 km is a reading typed from
+memory the next morning and is ignored.
+
+**The car's mileage lets go of a reading that is gone.** `car.mileage` is the highest
+reading ever saved, so a mistyped one stayed the car's mileage after the reading itself was
+corrected or deleted. `Storage._readingGone` runs after a reading is deleted, a record's
+odometer is edited, or a record is deleted, and puts the car back on the highest reading
+still held.
+
+**The calendar is how a date reaches the owner while the app is closed.** The app can only
+raise a notification when it is opened. `Features.buildCalendar` writes the document dates
+and each job's due date as an .ics file with alerts, handed over through the same share
+sheet as a backup. Each entry keeps a fixed UID, so adding the file again moves the entries
+instead of doubling them. A job's date is that day's estimate and says so. Not yet seen
+working on the iPhone: the share sheet may not offer Calendar directly, in which case the
+file is saved to Files and opened there.
+
+**A receipt is a reason to back up now.** A photo exists on the phone and nowhere else until
+it is in a backup, so saving one offers a backup in the same toast and keeps the nudge on
+Home until it is done (`autocare_lastReceipt` against `autocare_lastBackup`).
+
 **Nothing may be dated in the future.** `logOdometer` refuses a future reading and
 `addService` pulls a future service date back to today, because either one silently
 corrupts the schedule: a reading dated tomorrow becomes the car's current mileage, and a

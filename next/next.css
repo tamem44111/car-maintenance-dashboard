@@ -264,6 +264,32 @@ a.row, label.row { text-decoration: none; cursor: pointer; }
 .nudge { display: flex; align-items: center; justify-content: space-between; gap: 14px; width: 100%; margin-top: 10px; padding: 14px 16px; font-size: 15px; line-height: 1.35; }
 .nudge b { flex: none; color: var(--accent); font-weight: 600; }
 
+/* ── Search, in History ── */
+.search { display: flex; align-items: center; gap: 8px; margin-top: 14px; padding: 0 12px; border-radius: 12px; background: var(--card); color: var(--dim); }
+.search svg { width: 18px; height: 18px; flex: none; }
+.search input { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--ink); background: none; border: 0; padding: 10px 0; outline: none; -webkit-appearance: none; appearance: none; }
+.search input::placeholder { color: var(--dim); opacity: .8; }
+.search input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.search:focus-within { outline: 2px solid var(--accent); outline-offset: 0; }
+.search + .chips { margin-top: 10px; }
+.lede.none { margin-top: 28px; text-align: center; }
+
+/* what the next visit usually costs: never takes the colour of the due line */
+.row .row-main span.usual, .row.soon .row-main span.usual, .row.overdue .row-main span.usual { color: var(--dim); font-weight: 400; }
+
+/* ── Small parts the newer sheets share ── */
+.fact strong small.under { display: block; }
+.fact > span small { display: block; font-size: 13.5px; color: var(--dim); }
+.fact > span small.doubt, .hint.doubt { color: var(--amber); font-weight: 600; }
+.fact .link { flex: none; margin-top: 0; }
+.link.danger { color: var(--red); }
+.readings .fact + .fact { border-top: 1px solid var(--line); margin-inline-start: 16px; padding-inline-start: 0; }
+.lead { padding: 14px 16px 4px; font-size: 15px; line-height: 1.4; color: var(--dim); }
+label.quiet { text-align: center; cursor: pointer; }
+.field.stack .picks { margin-top: 8px; }
+.sheet .picks .chip.pick { background: var(--line); }
+.sheet .picks .chip.pick[aria-pressed="true"] { background: var(--accent); }
+
 /* The backup sheet comes from the shared code with the classic screens' class names */
 .classic { margin-top: 10px; padding: 16px; border-radius: 22px; background: var(--card); font-size: 16px; line-height: 1.4; }
 .classic .imp-choices { display: grid; gap: 8px; margin-top: 14px; }

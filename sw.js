@@ -1,4 +1,4 @@
-const CACHE = 'autocare-v47';
+const CACHE = 'autocare-v48';
 const ASSETS = ['./', './index.html', './classic.html', './styles.css', './i18n.js', './photos.js', './storage.js', './recommendations.js', './features.js', './app.js', './manifest.json', './icon-192.png', './icon-512.png',
     // index.html is the new design; classic.html is the screens it replaced
     './next/', './next/next.css', './next/next.js', './next/forms.js'];

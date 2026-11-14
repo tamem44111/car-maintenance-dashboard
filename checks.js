@@ -776,7 +776,9 @@ const Checks = {
             W = iframe.contentWindow; D = W.document;
             // As for the classic screens: no photo is tidied away while the fixture is
             // loaded, and a backup is built but not handed to the phone.
-            W.eval("Photos.remove = () => Promise.resolve(); Features._deliverBackup = () => Promise.resolve('download');");
+            // The calendar file is kept where a check can read it.
+            W.eval("Photos.remove = () => Promise.resolve(); Features._deliverBackup = () => Promise.resolve('download');"
+                + "window.__cal = null; Features._deliverFile = (text, name, mime) => { window.__cal = { text, name, mime }; return Promise.resolve('share'); };");
         };
         const wide = root => {
             const out = [];
@@ -962,6 +964,139 @@ const Checks = {
             tap('[data-do="lang"][data-arg="ar"]');
             this.eq('[new] the language switch mirrors the page and is remembered', [D.documentElement.getAttribute('dir'), store.getItem('autocare_lang')], ['rtl', 'ar']);
 
+            // ── Added on 2026-11-14: what the owner asked to be improved ──
+            const tick = ms => new Promise(r => setTimeout(r, ms));
+            const text = el => (el ? el.textContent.replace(/\s+/g, ' ') : '');
+            this.seed(window);
+            store.setItem('autocare_lastBackup', new Date(Date.now() - 5000).toISOString());
+            store.removeItem('autocare_lastReceipt');
+            store.removeItem('autocare_fuel');
+            await open('en');
+            const page = () => D.getElementById('app');
+            this.ok('[new] the next visit says what it usually costs, from past bills', /Usually about 120 SAR/.test(text($('.row'))), text($('.row')));
+
+            // logging without reading the odometer, with a warranty and a receipt
+            tap('.row.overdue'); tap('[data-do="logNext"]');
+            this.eq('[new] the odometer field starts empty, not on a guess', $('[data-f="km"]').value, '');
+            this.ok('[new] and says what an empty one is counted as', /use your reading from that day, 100,000 km/.test(text($('#km-note'))), text($('#km-note')));
+            tap('[data-do="logNext"]');
+            tap('[data-do="war"]'); type('[data-f="warMonths"]', '12'); type('[data-f="cost:Air Filter"]', '90');
+            this.eq('[new] no overflow with a warranty open', wide(D.getElementById('sheet')), []);
+            W.eval("Next.form.photoIds.push('ph-test')");
+            tap('[data-do="saveLog"]');
+            const noKm = records().filter(s => s.type === 'Air Filter').pop();
+            this.eq('[new] a job saved without a reading holds none, and the car keeps its own', [noKm.mileage, car().mileage], ['', '100000']);
+            this.eq('[new] the warranty typed in step 3 is saved with the job', (noKm.bills || []).map(b => [b.warrantyMonths, b.amount, b.photoIds.length]), [['12', '90', 1]]);
+            this.ok('[new] the schedule still counts it, from that day\'s reading', !$('.row.overdue'), text($('.row')));
+            this.ok('[new] saving a receipt offers a backup there and then', /Back up/.test(text($('#toast button'))), text($('#toast')));
+            this.ok('[new] and Home keeps saying so until it is done', /only on this phone/.test(text($('.nudge[data-do="backup"]'))), text($('.nudge')));
+            tap('[data-go="car"]');
+            this.ok('[new] the warranty shows on the Car screen', /Warranties/.test(text(page())) && /days left/.test(text(page())));
+
+            // a brake check is when pads get measured
+            tap('.plus'); tap('.pick[data-arg="Brake Inspection"]'); tap('[data-do="logNext"]'); tap('[data-do="logNext"]');
+            this.eq('[new] a brake check asks for both pad thicknesses', [!!$('[data-f="pad:Front Brake Pads"]'), !!$('[data-f="pad:Rear Brake Pads"]')], [true, true]);
+            type('[data-f="pad:Front Brake Pads"]', '8'); tap('[data-do="saveLog"]');
+            const measured = records().find(s => s.type === 'Front Brake Pads') || {};
+            this.eq('[new] a thickness typed there is kept as a check of those pads, and the other axle is left alone',
+                [measured.checkOnly, measured.padThickness, records().some(s => s.type === 'Rear Brake Pads')], [true, '8', false]);
+            tap('[data-do="job"][data-arg="Front Brake Pads"]');
+            this.ok('[new] the pads\' own sheet shows the measurement and the limit', /8 mm on/.test(text(sheet())) && /Replace at 3 mm/.test(text(sheet())), text(sheet()));
+            tap('[data-do="measure"]');
+            this.eq('[new] "Add a measurement" opens the form as a check, not a replacement',
+                [$('[data-arg="checkOnly"]').getAttribute('aria-checked'), [...D.querySelectorAll('.pick')].length], ['true', 0]);
+            tap('[data-close="sheet"]');
+
+            // a reading typed too high: raised, found, deleted, put back
+            tap('[data-go="home"]'); tap('[data-do="odo"]');
+            type('[data-f="km"]', '190000'); type('[data-f="date"]', this.localDay(40)); tap('[data-do="saveOdo"]');
+            this.ok('[new] a reading that cannot be right is raised on Home', car().mileage === '190000' && !!$('.nudge[data-do="checks"]'), text(page()).slice(-160));
+            tap('.nudge[data-do="checks"]');
+            this.ok('[new] and named as the one that is probably wrong', /190,000 km/.test(text(sheet())) && /probably the wrong one/.test(text(sheet())), text(sheet()));
+            this.eq('[new] no overflow in the readings sheet', wide(D.getElementById('sheet')), []);
+            tap('.sheet [data-do="odo"]');
+            this.ok('[new] the odometer sheet lists it, marked', /190,000/.test(text($('.readings'))) && !!$('.readings .doubt'), text($('.readings')));
+            this.eq('[new] no overflow in the odometer sheet', wide(D.getElementById('sheet')), []);
+            const drop = () => [...D.querySelectorAll('[data-do="dropOdo"]')].find(b => /190,000/.test(b.closest('.fact').textContent));
+            drop().click();
+            this.ok('[new] deleting a reading asks for a second tap', car().mileage === '190000' && /again/.test(drop().textContent));
+            drop().click();
+            this.eq('[new] the second tap deletes it, and the car goes back to its real reading',
+                [car().mileage, S().getOdometerLogs('test-car').some(o => o.km === 190000)], ['100000', false]);
+            tap('#toast button');
+            this.ok('[new] Undo puts the reading back', S().getOdometerLogs('test-car').some(o => o.km === 190000) && !!drop());
+            drop().click(); drop().click(); tap('[data-close="sheet"]');
+            this.ok('[new] with the wrong reading gone, nothing is raised', !$('.nudge[data-do="checks"]'));
+
+            // two readings that contradict each other: either could be the wrong one
+            W.eval(`Storage.addService({ carId: 'test-car', type: 'Coolant Flush', date: '${this.localDay(20)}', mileage: '95000', cost: '' }); Next.render();`);
+            tap('.nudge[data-do="checks"]');
+            this.eq('[new] a contradicting pair is shown as two, with no guess at which', sheet().querySelectorAll('.row').length, 2);
+            [...sheet().querySelectorAll('.row')].find(r => /coolant/.test(r.textContent)).click();
+            this.ok('[new] the record opens with what the other readings put that day at', /about 97,800 km/.test(text($('#km-note'))), text($('#km-note')));
+            type('[data-f="km"]', '97800'); tap('[data-do="saveEdit"]'); tap('[data-close="sheet"]');
+            this.eq('[new] correcting it settles the readings', S().getReadingConflicts('test-car').length, 0);
+
+            // finding a record
+            tap('[data-go="history"]');
+            type('[data-q]', 'coolant');
+            this.eq('[new] searching History narrows it to what matches', rows().map(r => r.querySelector('strong').textContent), ['Coolant']);
+            type('[data-q]', '97,800');
+            this.eq('[new] a reading finds its visit', rows().length, 1);
+            type('[data-q]', 'فلتر');
+            this.ok('[new] an Arabic word finds the job while the app is in English', rows().length >= 1 && rows().every(r => /filter/i.test(r.textContent)), rows().map(r => r.textContent).join(' | '));
+            type('[data-q]', 'zzzz');
+            this.ok('[new] and it says when nothing matches', /Nothing matches/.test(text($('#hist-list'))) && $('[data-q]').value === 'zzzz');
+            type('[data-q]', '');
+            this.eq('[new] no overflow in History with the search box', wide(D.body), []);
+
+            // fuel, tyres, the car, the calendar, deleted records
+            tap('[data-go="car"]'); tap('[data-do="fuel"]'); tap('[data-arg="mode=consumption"]'); tap('[data-do="saveFuel"]');
+            this.ok('[new] a fuel estimate with no figures is refused', !!$('.warn') && !store.getItem('autocare_fuel'));
+            type('[data-f="lp100"]', '11');
+            this.ok('[new] the fuel sheet says what the figures come to in a year', /SAR a year, 11\.0 L\/100 km/.test(text($('#fuel-says'))), text($('#fuel-says')));
+            this.eq('[new] no overflow in the fuel sheet', wide(D.getElementById('sheet')), []);
+            tap('[data-do="saveFuel"]');
+            this.eq('[new] the fuel setting is saved where backups carry it', [JSON.parse(store.getItem('autocare_fuel')).mode, JSON.parse(store.getItem('autocare_fuel')).lp100], ['consumption', '11']);
+            this.ok('[new] and running cost then names both parts', /maintenance [\d.]+, fuel about [\d.]+/.test(text(page())), text($('[aria-label="Costs"]')));
+
+            tap('[data-do="tyre"]'); type('[data-f="dot"]', '9924'); tap('[data-do="saveTyre"]');
+            this.ok('[new] a date code that cannot be one is refused', !!$('.warn') && !(car().tires || {}).manufactureDate);
+            type('[data-f="dot"]', '0124'); type('[data-f="brand"]', 'Roadgrip'); tap('[data-do="saveTyre"]');
+            this.eq('[new] a DOT code becomes the month the tyres were made', [car().tires.manufactureDate, car().tires.brand], ['2024-01', 'Roadgrip']);
+            this.ok('[new] and the Car screen then shows their age', /Jan 2024/.test(text($('[aria-label="Tyres"]'))) && /years old/.test(text($('[aria-label="Tyres"]'))), text($('[aria-label="Tyres"]')));
+
+            tap('[data-do="carEdit"]'); type('[data-f="plate"]', 'ABC 123'); tap('[data-do="saveCar"]');
+            this.eq('[new] car details are saved', car().plate, 'ABC 123');
+            tap('[data-do="carEdit"]'); type('[data-f="make"]', ''); tap('[data-do="saveCar"]');
+            this.ok('[new] a car with no make is refused', !!$('.warn') && car().make === 'Ford');
+            tap('[data-close="sheet"]');
+
+            tap('[data-do="calendar"]');
+            this.eq('[new] no overflow in the calendar sheet', wide(D.getElementById('sheet')), []);
+            tap('[data-do="addCalendar"]');
+            await tick(60);
+            const cal = W.__cal || {};
+            this.eq('[new] Add to Calendar hands the phone a calendar file', [cal.name, cal.mime, /BEGIN:VEVENT/.test(cal.text || '')], ['autocare.ics', 'text/calendar', true]);
+            this.ok('[new] with jobs named the way the app names them', /SUMMARY:Oil change due \(Ford Taurus\)/.test(cal.text || ''), (cal.text || '').slice(0, 300));
+
+            const gone = records().find(s => s.type === 'Coolant Flush');
+            W.eval(`Storage.deleteService('${gone.id}'); Next.render();`);
+            tap('[data-do="trash"]');
+            this.ok('[new] a deleted record is listed for thirty days', /Coolant/.test(text(sheet())), text(sheet()));
+            tap('[data-do="restore"]');
+            this.ok('[new] and can be restored from there', records().some(s => s.id === gone.id));
+            tap('[data-close="sheet"]');
+            this.eq('[new] no overflow on Car with everything set', wide(D.body), []);
+
+            // a phone with no car yet
+            store.setItem('autocare_data', JSON.stringify({ cars: [], services: [], reminders: [], fuelLogs: [], odometerLogs: [], trash: [] }));
+            await open('en');
+            tap('[data-do="carEdit"]');
+            type('[data-f="make"]', 'Kia'); type('[data-f="model"]', 'Rio'); type('[data-f="km"]', '5000'); tap('[data-do="saveCar"]');
+            this.eq('[new] a first car is added here, with its first reading', [S().getCars().length, car().make, car().mileage, !!$('.odo')], [1, 'Kia', '5000', true]);
+            store.removeItem('autocare_fuel');
+
             // ── History: the same records as a logbook, one row per trip to the workshop ──
             // Two jobs on one day, a check where nothing was replaced, and an accident
             // repair paid by insurance whose two bills share one photographed invoice.
@@ -1013,6 +1148,8 @@ const Checks = {
             this.ok('[new] Arabic counts take the right form of the noun',
                 /4 زيارات/.test($('.lede').textContent) && /فاتورة واحدة/.test(rowFor(20).textContent),
                 $('.lede').textContent + ' / ' + rowFor(20).textContent);
+            this.eq('[new] and so do days and months', [1, 2, 5, 13, 100].map(n => W.eval(`Next.span(${n * 30})`)).concat([2, 5, 13].map(n => W.eval(`Next.span(${n})`))),
+                ['نحو 30 يوماً', 'نحو 60 يوماً', 'نحو 5 أشهر', 'نحو 13 شهراً', 'نحو 100 شهر', 'نحو يومين', 'نحو 5 أيام', 'نحو 13 يوماً']);
             const arabic = where => {
                 this.eq(`[new] ${where}: nothing left in English`, english(), []);
                 this.eq(`[new] ${where}: no overflow in Arabic`, wide(D.body), []);
@@ -1039,6 +1176,16 @@ const Checks = {
             tap('[data-close="sheet"]');
             tap('[data-do="doc"][data-arg="fahesExpiry"]'); arabic('a document sheet');
             tap('[data-close="sheet"]');
+            tap('[data-do="job"][data-arg="Front Brake Pads"]'); arabic('measured pads'); tap('[data-close="sheet"]');
+            tap('[data-do="fuel"]'); tap('[data-arg="mode=monthly"]'); type('[data-f="monthly"]', '900'); arabic('the fuel sheet'); tap('[data-close="sheet"]');
+            tap('[data-do="tyre"]'); type('[data-f="dot"]', '9924'); tap('[data-do="saveTyre"]'); arabic('the tyre sheet'); tap('[data-close="sheet"]');
+            tap('[data-do="carEdit"]'); arabic('car details'); tap('[data-close="sheet"]');
+            tap('[data-do="calendar"]'); arabic('the calendar sheet'); tap('[data-close="sheet"]');
+            W.eval(`Storage.logOdometer('test-car', 190000, '${this.localDay(40)}'); Storage.deleteService('h-brk'); Next.render();`);
+            arabic('Car, with readings to check and a deleted record');
+            tap('[data-do="checks"]'); arabic('readings to check'); tap('.sheet [data-do="odo"]'); arabic('the readings list'); tap('[data-close="sheet"]');
+            tap('[data-do="trash"]'); arabic('deleted records'); tap('[data-close="sheet"]');
+            tap('[data-go="history"]'); type('[data-q]', 'zzzz'); arabic('a search with no result');
         } catch (e) {
             this.failures.push({ name: 'the new design checks threw', detail: e.message + '\n' + (e.stack || '').split('\n')[1] });
         }
@@ -1187,11 +1334,156 @@ const Checks = {
             this.ok('in km, not the six-month limit', st.detail.includes('km left'), st.detail);
         });
         await T('a job with no km on record', async () => {
-            Storage.addService({ carId: 'test-car', type: 'Tire Rotation', date: day(10), mileage: '', cost: '' });
+            // the nearest readings are 150 and 170 days from this day: too far to say
+            Storage.addService({ carId: 'test-car', type: 'Tire Rotation', date: day(200), mileage: '', cost: '' });
             const st = Recommendations.getMaintenanceStatus(firstCar(), 'Tire Rotation');
-            this.eq('there is no distance to count down', st.kmDaysRemaining, null);
+            this.eq('with no reading near its day there is no distance to count down', [st.hasKm, st.kmDaysRemaining], [false, null]);
             this.eq('so it runs on the calendar', st.binding, 'time');
             this.eq('and its due date is the calendar date', st.dueDate, st.nextDate);
+        });
+        await T('a job with no km, between two readings', async () => {
+            // 96,700 thirty days ago and 100,000 today: ten days ago was about 98,900
+            Storage.addService({ carId: 'test-car', type: 'Tire Rotation', date: day(10), mileage: '', cost: '' });
+            let st = Recommendations.getMaintenanceStatus(firstCar(), 'Tire Rotation');
+            this.near('its odometer is worked out from the readings either side', st.nextKm - st.rec.km, 98900, 5);
+            this.eq('and passed on as an estimate', [st.hasKm, st.kmEstimated], [true, true]);
+            this.eq('nothing is written into the record', Storage.getServices('test-car').find(s => s.type === 'Tire Rotation').mileage, '');
+            this.eq('nor counted as a reading', Storage.getOdometerReadings('test-car').some(r => r.date === day(10)), false);
+            Storage.logOdometer('test-car', 98000, day(10));
+            st = Recommendations.getMaintenanceStatus(firstCar(), 'Tire Rotation');
+            this.eq('a reading taken that day is used as it is', [st.nextKm - st.rec.km, st.kmEstimated], [98000, false]);
+            this.eq('before the first reading there is nothing to say', Storage.kmOn('test-car', day(400)), null);
+        });
+
+        // -- brake pads, by measurement --
+        await T('pads measured since they were fitted', async () => {
+            const pads = (date, over) => Storage.addService({ carId: 'test-car', type: 'Front Brake Pads', date, mileage: '', cost: '', ...over });
+            pads(day(300), { mileage: '70000' });
+            let st = Recommendations.getMaintenanceStatus(firstCar(), 'Front Brake Pads');
+            this.eq('with no measurement the interval decides', [!!st.measured, st.nextKm], [false, 70000 + st.rec.km]);
+            // 12 mm new at 70,000; 9 mm at 96,700: 3 mm in 26,700 km, so 6 mm more is 53,400 km
+            pads(day(30), { mileage: '96700', checkOnly: true, padThickness: '9' });
+            st = Recommendations.getMaintenanceStatus(firstCar(), 'Front Brake Pads');
+            this.eq('a measurement takes over from the interval', [st.measured.basis, st.measured.assumedNew, st.nextKm], ['km', true, 96700 + 53400]);
+            this.eq('and the distance is passed on as an estimate', [st.status, st.kmEstimated], ['ok', true]);
+            // a second measurement of the same set is a real wear rate: 1 mm in 3,300 km
+            pads(day(0), { mileage: '100000', checkOnly: true, padThickness: '8' });
+            this.eq('one measurement a month later is too close to trust on its own',
+                Recommendations.getMaintenanceStatus(firstCar(), 'Front Brake Pads').measured.assumedNew, true);
+        });
+        await T('pads at the limit', async () => {
+            const pads = over => Storage.addService({ carId: 'test-car', type: 'Rear Brake Pads', cost: '', mileage: '', ...over });
+            pads({ date: day(300) });
+            pads({ date: day(20), checkOnly: true, padThickness: '4' });
+            let st = Recommendations.getMaintenanceStatus(firstCar(), 'Rear Brake Pads');
+            this.eq('low pads are due soon whatever the dates say', [st.status, st.measured.basis], ['soon', 'days']);
+            pads({ date: day(5), checkOnly: true, padThickness: '3' });
+            st = Recommendations.getMaintenanceStatus(firstCar(), 'Rear Brake Pads');
+            this.eq('pads at 3 mm are due now', st.status, 'overdue');
+            pads({ date: day(1), padThickness: '' });
+            st = Recommendations.getMaintenanceStatus(firstCar(), 'Rear Brake Pads');
+            this.eq('a new set starts again without the old measurement', [st.status, !!st.measured], ['ok', false]);
+        });
+        await T('a worked-out pad date that has passed', async () => {
+            const pads = over => Storage.addService({ carId: 'test-car', type: 'Rear Brake Pads', cost: '', mileage: '', ...over });
+            // 12 mm to 6 mm in 200 days; the last 3 mm were due about 60 days ago
+            pads({ date: day(360) });
+            pads({ date: day(160), checkOnly: true, padThickness: '6' });
+            const st = Recommendations.getMaintenanceStatus(firstCar(), 'Rear Brake Pads');
+            this.eq('asks for a new measurement rather than calling the pads finished', [st.status, st.measured.stale], ['soon', true]);
+        });
+        await T('a pad measurement more than a year old', async () => {
+            const pads = over => Storage.addService({ carId: 'test-car', type: 'Rear Brake Pads', cost: '', mileage: '', ...over });
+            // 12 mm to 11 mm in 300 days: years of life left on paper
+            pads({ date: day(700) });
+            pads({ date: day(400), checkOnly: true, padThickness: '11' });
+            const st = Recommendations.getMaintenanceStatus(firstCar(), 'Rear Brake Pads');
+            this.eq('is not trusted to run on: it asks to be measured again', [st.status, st.measured.stale, st.daysRemaining > 365], ['soon', true, true]);
+        });
+
+        // -- readings that cannot all be true --
+        await T('an odometer that goes backwards', async () => {
+            const names = () => Storage.getReadingConflicts('test-car').map(c => [c.high.km, c.lower.map(l => l.km)]);
+            this.eq('the fixture has none', names(), []);
+            Storage.addService({ carId: 'test-car', type: 'Coolant Flush', date: day(20), mileage: '95000', cost: '' });
+            this.eq('a later, lower reading is named with the one it contradicts', names(), [[96700, [95000]]]);
+            Storage.logOdometer('test-car', 96650, day(25));
+            this.eq('a few km the wrong way round is not raised', names(), [[96700, [95000]]]);
+        });
+        await T('one reading typed too high', async () => {
+            Storage.logOdometer('test-car', 190000, day(40));
+            const c = Storage.getReadingConflicts('test-car');
+            this.eq('is named once, not once for every reading after it', [c.length, c[0].high.km, c[0].lower.length], [1, 190000, 2]);
+            this.eq('and it has become the car\'s mileage', firstCar().mileage, '190000');
+            Storage.deleteOdometerLog(Storage.getOdometerLogs('test-car').find(o => o.km === 190000).id);
+            this.eq('deleting it puts the car back on its real reading', [firstCar().mileage, firstCar().mileageDate], ['100000', day(0)]);
+            this.eq('and the readings agree again', Storage.getReadingConflicts('test-car').length, 0);
+        });
+        await T('a record saved with the wrong reading', async () => {
+            const s = Storage.addService({ carId: 'test-car', type: 'Battery', date: day(0), mileage: '1000500', cost: '' });
+            this.eq('a mistyped reading on a record becomes the car\'s mileage', firstCar().mileage, '1000500');
+            Storage.updateService(s.id, { mileage: '100050' });
+            this.eq('correcting the record corrects the car', firstCar().mileage, '100050');
+            Storage.deleteService(s.id);
+            this.eq('and deleting the record lets go of its reading', firstCar().mileage, '100000');
+        });
+
+        // -- the phone's calendar --
+        await T('the calendar file', async () => {
+            Storage.updateCar('test-car', { insuranceExpiry: day(-200), registrationExpiry: day(5) });
+            const events = Features.calendarEvents(firstCar());
+            this.eq('a document that is still valid is in it, an expired one is not',
+                [events.some(e => /insuranceExpiry/.test(e.uid)), events.some(e => /registrationExpiry/.test(e.uid))], [true, false]);
+            this.ok('so is the oil change, on the day the schedule gives',
+                events.some(e => /Oil-Change/.test(e.uid) && e.date === Recommendations.getMaintenanceStatus(firstCar(), 'Oil Change').dueDate));
+            this.ok('an overdue job is left to the app', !events.some(e => /Air-Filter/.test(e.uid)));
+            const ics = Features.buildCalendar(firstCar());
+            const lines = ics.split('\r\n');
+            this.eq('it opens and closes as a calendar', [lines[0], lines[lines.length - 2]], ['BEGIN:VCALENDAR', 'END:VCALENDAR']);
+            this.eq('every entry is closed', ics.split('BEGIN:VEVENT').length, ics.split('END:VEVENT').length);
+            this.ok('a document alerts a month before, a week before and on the day',
+                /insuranceExpiry[\s\S]*?TRIGGER:-P29DT15H[\s\S]*?TRIGGER:-P6DT15H[\s\S]*?TRIGGER:PT9H/.test(ics));
+            I18N.set('ar');
+            const bytes = l => new W.TextEncoder().encode(l).length;
+            this.eq('no line is longer than a calendar allows, in Arabic too',
+                Features.buildCalendar(firstCar()).split('\r\n').filter(l => bytes(l) > 75), []);
+            this.ok('and the entries are in Arabic', /SUMMARY:[^\r]*[\u0600-\u06FF]/.test(Features.buildCalendar(firstCar())));
+            I18N.set('en');
+            const uid = () => Features.buildCalendar(firstCar()).match(/UID:[^\r]*Oil-Change[^\r]*/)[0];
+            const first = uid();
+            Storage.addService({ carId: 'test-car', type: 'Oil Change', date: day(0), mileage: '100000', cost: '' });
+            this.eq('an entry keeps its identity when its date moves, so adding the file again updates it', uid(), first);
+        });
+
+        // -- warranties and receipts from the new log form --
+        await T('a visit logged with a warranty', async () => {
+            Features.logVisit({ carId: 'test-car', date: day(0), mileage: '100000', notes: '', shop: '', photoIds: [],
+                jobs: [{ type: 'Battery', cost: '300', warrantyMonths: '12', warrantyKm: '' }, { type: 'Air Filter', cost: '90' }] });
+            const battery = Storage.getServices('test-car').find(s => s.type === 'Battery');
+            this.eq('the warranty is kept on a bill of that job', (battery.bills || []).map(b => [b.amount, b.warrantyMonths, b.startKm]), [['300', '12', '100000']]);
+            this.eq('and shows as a live warranty', Storage.getActiveWarranties('test-car').map(w => w.bill.serviceType), ['Battery']);
+            this.eq('a job without one gets no bill', (Storage.getServices('test-car').filter(s => s.type === 'Air Filter').pop().bills || []).length, 0);
+        });
+        await T('a receipt added since the last backup', async () => {
+            Storage.markBackedUp();
+            this.eq('nothing to back up straight after a backup', Storage.getBackupStatus().needed, false);
+            await tick(15);
+            Features.logVisit({ carId: 'test-car', date: day(0), mileage: '100000', notes: '', shop: '', photoIds: ['ph-new'], jobs: [{ type: 'Battery', cost: '300' }] });
+            const b = Storage.getBackupStatus();
+            this.eq('is a reason to back up now, not in thirty days', [b.needed, b.newReceipt], [true, true]);
+            await tick(15);
+            Storage.markBackedUp();
+            this.eq('and backing up answers it', Storage.getBackupStatus().needed, false);
+        });
+        await T('a job logged without a reading', async () => {
+            Features.logVisit({ carId: 'test-car', date: day(0), mileage: '', notes: '', shop: '', photoIds: [], jobs: [{ type: 'Battery', cost: '' }, { type: 'Oil Change', cost: '' }] });
+            const auto = type => Storage.getReminders('test-car').filter(r => r.type === type && r.autoCreated && !r.completed);
+            this.eq('still gets its reminder', [auto('Battery').length, auto('Oil Change').length], [1, 1]);
+            this.eq('with no invented distance', auto('Battery')[0].dueMileage, '');
+            this.eq('and leaves the car\'s mileage alone', firstCar().mileage, '100000');
+            Recommendations.syncAutoReminders();
+            this.eq('the schedule then fills the distance in from the day\'s reading', auto('Battery')[0].dueMileage,
+                String(100000 + Recommendations.getEffective(firstCar(), 'Battery').km));
         });
 
         // -- reminders are a view of the schedule --

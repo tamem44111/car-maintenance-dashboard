@@ -269,6 +269,72 @@ const Recommendations = {
         return result;
     },
 
+    // ── Brake pads, by measurement ──
+    // A fixed interval is a guess at how fast pads wear; a thickness someone
+    // measured is what they have actually done. So once a set has been measured,
+    // the measurement decides, and the interval is only the fallback.
+    PAD_TYPES: ['Front Brake Pads', 'Rear Brake Pads'],
+    PAD_MIN_MM: 3,          // replace at this thickness
+    PAD_LOW_MM: 4.5,        // plan the job from here down
+    // What a new set is taken to start at when nobody measured it on the day. New
+    // pads are 10 to 12 mm; the top of that range makes the worked-out wear faster,
+    // so the estimate errs towards replacing early rather than late.
+    PAD_NEW_MM: 12,
+    // Two points this close together say more about the gauge than about the wear
+    PAD_MIN_DAYS: 60,
+    // An estimate resting on a measurement older than this is asked to be renewed
+    PAD_STALE_DAYS: 365,
+
+    // What the latest measurement of the set on the car says about when it will be
+    // worn out. Wear is taken from two measurements of the same set, or failing
+    // that from the day it was fitted. By distance when both points have one,
+    // otherwise by time. `basis` is null when there is nothing to work a rate from.
+    padEstimate(car, type) {
+        if (!this.PAD_TYPES.includes(type)) return null;
+        const all = Storage.getServices(car.id).filter(s => s.type === type && s.date)
+            .sort((a, b) => a.date.localeCompare(b.date));
+        const fitted = all.filter(s => !s.checkOnly).pop() || null;
+        const points = all.filter(s => parseFloat(s.padThickness) > 0 && (!fitted || s.date >= fitted.date))
+            .map(s => ({ mm: parseFloat(s.padThickness), date: s.date, km: this._kmOf(s) }));
+        if (!points.length) return null;
+        const latest = points[points.length - 1];
+        const out = { mm: latest.mm, date: latest.date, minMm: this.PAD_MIN_MM, basis: null, assumedNew: false, nextKm: null, nextDate: null };
+        if (latest.mm <= this.PAD_MIN_MM) return out;
+
+        const days = (a, b) => (new Date(b) - new Date(a)) / 86400000;
+        const usable = from => from && from.mm > latest.mm && days(from.date, latest.date) >= this.PAD_MIN_DAYS;
+        let from = points.slice(0, -1).reverse().find(usable) || null;
+        if (!from && fitted && fitted.date < latest.date) {
+            const start = { mm: this.PAD_NEW_MM, date: fitted.date, km: this._kmOf(fitted) };
+            if (usable(start)) { from = start; out.assumedNew = true; }
+        }
+        if (!from) return out;
+
+        const left = latest.mm - this.PAD_MIN_MM, worn = from.mm - latest.mm;
+        const rate = Storage.getDailyKmRate(car.id);
+        if (from.km && latest.km && latest.km > from.km && rate > 0) {
+            out.basis = 'km';
+            out.nextKm = Math.round(latest.km + left * (latest.km - from.km) / worn);
+            const eta = new Date();
+            eta.setDate(eta.getDate() + Math.round((out.nextKm - Storage.getEffectiveMileage(car)) / rate));
+            out.nextDate = Storage.dateStr(eta);
+        } else {
+            out.basis = 'days';
+            const eta = new Date(latest.date);
+            eta.setDate(eta.getDate() + Math.round(left * days(from.date, latest.date) / worn));
+            out.nextDate = eta.toISOString().split('T')[0];
+        }
+        return out;
+    },
+
+    // A record's odometer: what was typed, or what the readings around its day say
+    _kmOf(s) {
+        const typed = parseInt(s.mileage) || 0;
+        if (typed > 0) return typed;
+        const at = Storage.kmOn(s.carId, s.date);
+        return at ? at.km : 0;
+    },
+
     // Full due-status for a service, evaluating BOTH km and time — due on whichever comes first.
     // Returns null if no recommendation exists for this type.
     getMaintenanceStatus(car, type) {
@@ -288,6 +354,7 @@ const Recommendations = {
         const last = services[0];
         const months = rec.months || 12;
         const today = new Date();
+        const pad = this.padEstimate(car, type);
 
         // No record is not the same as never done. Most owners start logging partway
         // through a car's life, so the honest answer is "we do not know" — inventing a
@@ -299,21 +366,33 @@ const Recommendations = {
                 kmRemaining: null, daysRemaining: null, usedPct: 0,
                 nextKm: null, nextDate: null, kmEtaDate: null, kmDaysRemaining: null,
                 dueDate: null, dueDays: null, rate: Storage.getDailyKmRate(car.id),
-                lastServiced: null
+                lastServiced: null, measured: pad
             };
         }
 
         // ── Distance dimension ──
-        const lastKm = last ? (parseInt(last.mileage) || 0) : 0;
-        const baseKm = lastKm > 0 ? lastKm : currentKm;          // assume done at current km if never logged
+        // A record saved without a reading takes the odometer of its own day when
+        // anything was read then, or what the readings either side of it say. That
+        // second kind is an estimate, and is passed on as one.
+        let lastKm = parseInt(last.mileage) || 0;
+        let kmEstimated = false;
+        if (!lastKm) {
+            const at = Storage.kmOn(car.id, last.date);
+            if (at) { lastKm = at.km; kmEstimated = at.estimated; }
+        }
+        // Measured pads are due when the wear says so, not when the interval does
+        const byWear = pad && pad.basis;
+        if (byWear) { lastKm = byWear === 'km' ? pad.nextKm - rec.km : 0; kmEstimated = byWear === 'km'; }
+        const baseKm = lastKm > 0 ? lastKm : currentKm;          // with no reading there is no distance to count
         const nextKm = baseKm + rec.km;
         const kmRemaining = nextKm - currentKm;
         const kmUsedPct = Math.min(100, Math.max(0, ((rec.km - kmRemaining) / rec.km) * 100));
 
         // ── Time dimension ──
-        const baseDate = last ? new Date(last.date) : today;     // assume done today if never logged
-        const nextDate = new Date(baseDate);
+        const baseDate = new Date(last.date);
+        let nextDate = new Date(baseDate);
         nextDate.setMonth(nextDate.getMonth() + months);
+        if (byWear) nextDate = new Date(pad.nextDate);
         const daysRemaining = Math.ceil((nextDate - today) / 86400000);
         const totalDays = months * 30.44;
         const timeUsedPct = Math.min(100, Math.max(0, ((totalDays - daysRemaining) / totalDays) * 100));
@@ -346,6 +425,17 @@ const Recommendations = {
             if (status === 'ok' && kmDaysRemaining <= 30) status = 'soon';
         }
 
+        // What was measured outranks what was worked out from it. Pads at the limit
+        // are due whatever the dates say; a worked-out date that has passed is a
+        // reason to measure again, not proof the pads are finished.
+        if (pad) {
+            pad.stale = false;
+            const old = (today - new Date(pad.date)) / 86400000 > this.PAD_STALE_DAYS;
+            if (pad.mm <= this.PAD_MIN_MM) status = 'overdue';
+            else if (byWear && (status === 'overdue' || (old && status === 'ok'))) { status = 'soon'; pad.stale = true; }
+            else if (pad.mm <= this.PAD_LOW_MM && status === 'ok') status = 'soon';
+        }
+
         // Effective due date = the earlier of the time-based date and the km ETA
         let dueDate = nextDate.toISOString().split('T')[0];
         let dueDays = daysRemaining;
@@ -372,9 +462,9 @@ const Recommendations = {
         return {
             type, rec, status, binding, detail,
             kmRemaining, daysRemaining, usedPct: Math.round(usedPct),
-            nextKm, hasKm: lastKm > 0, nextDate: nextDate.toISOString().split('T')[0],
+            nextKm, hasKm: lastKm > 0, kmEstimated, nextDate: nextDate.toISOString().split('T')[0],
             kmEtaDate, kmDaysRemaining, dueDate, dueDays, rate,
-            lastServiced: last ? last.date : null
+            lastServiced: last ? last.date : null, measured: pad
         };
     },
 
@@ -420,7 +510,10 @@ const Recommendations = {
         const rec = this.getEffective(car, serviceType);
         if (!rec || !rec.km) return;
 
-        const nextMileage = parseInt(serviceMileage) + rec.km;
+        // A job saved without a reading still gets its reminder. Its figures are
+        // brought into line with the schedule on the next draw (syncAutoReminders).
+        const base = parseInt(serviceMileage) || 0;
+        const nextMileage = base ? base + rec.km : 0;
         const nextDate = new Date(serviceDate);
         nextDate.setMonth(nextDate.getMonth() + (rec.months || 12));
 
@@ -432,8 +525,8 @@ const Recommendations = {
             carId: car.id,
             type: serviceType,
             dueDate: nextDate.toISOString().split('T')[0],
-            dueMileage: nextMileage.toString(),
-            notes: `Auto: next ${serviceType} at ${nextMileage.toLocaleString()} km (${rec.note})`,
+            dueMileage: nextMileage ? nextMileage.toString() : '',
+            notes: nextMileage ? `Auto: next ${serviceType} at ${nextMileage.toLocaleString()} km (${rec.note})` : `Auto: next ${serviceType} (${rec.note})`,
             completed: false,
             autoCreated: true,
         });

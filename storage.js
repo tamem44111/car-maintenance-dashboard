@@ -64,8 +64,14 @@ const Storage = {
         if (!lastBackup) return { needed: true, never: true, lastBackup: null, daysSinceBackup: null, unsavedChanges: true };
         const daysSinceBackup = days(lastBackup);
         const unsavedChanges = lastChange ? new Date(lastChange) > new Date(lastBackup) : false;
-        return { needed: unsavedChanges && daysSinceBackup >= 30, never: false, lastBackup, daysSinceBackup, unsavedChanges };
+        // A receipt photo exists on this phone and nowhere else until it is backed
+        // up, so one added since the last backup does not wait thirty days.
+        const receiptAt = localStorage.getItem('autocare_lastReceipt');
+        const newReceipt = !!receiptAt && new Date(receiptAt) > new Date(lastBackup);
+        return { needed: newReceipt || (unsavedChanges && daysSinceBackup >= 30), never: false, lastBackup, daysSinceBackup, unsavedChanges, newReceipt };
     },
+
+    markReceiptAdded() { localStorage.setItem('autocare_lastReceipt', new Date().toISOString()); },
 
     // ── Trash (30-day undo for deletes) ──
     TRASH_DAYS: 30,
@@ -89,6 +95,15 @@ const Storage = {
         return this.getAll().trash.slice().sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
     },
 
+    // Deleted service records still inside the retention window, newest first.
+    // A plain read: drawing a screen must not write, and getTrash purges as it goes.
+    getDeletedServices(carId) {
+        const cutoff = Date.now() - this.TRASH_DAYS * 86400000;
+        return this._read().trash
+            .filter(x => x.kind === 'service' && x.record && x.record.carId === carId && new Date(x.deletedAt).getTime() >= cutoff)
+            .sort((a, b) => new Date(b.deletedAt) - new Date(a.deletedAt));
+    },
+
     // Drop anything past the retention window
     purgeTrash() {
         const data = this.getAll();
@@ -110,6 +125,7 @@ const Storage = {
             });
         }
         this.save(data);
+        if (entry.kind === 'service') this._syncOdometer(entry.record.carId, entry.record.mileage, entry.record.date);
         return true;
     },
 
@@ -208,10 +224,22 @@ const Storage = {
     updateService(id, updates) {
         const data = this.getAll();
         const idx = data.services.findIndex(s => s.id === id);
-        if (idx !== -1) { data.services[idx] = { ...data.services[idx], ...updates }; this.save(data); }
+        if (idx === -1) return;
+        const was = data.services[idx];
+        data.services[idx] = { ...was, ...updates };
+        this.save(data);
+        const now = data.services[idx];
+        if (String(was.mileage || '') !== String(now.mileage || '')) {
+            this._readingGone(was.carId, was.mileage);
+            this._syncOdometer(now.carId, now.mileage, now.date);
+        }
     },
 
-    deleteService(id) { this._toTrash('service', 'services', id); },
+    deleteService(id) {
+        const was = this.getServices().find(s => s.id === id);
+        this._toTrash('service', 'services', id);
+        if (was) this._readingGone(was.carId, was.mileage);
+    },
 
     // --- Reminders ---
     getReminders(carId) {
@@ -300,19 +328,91 @@ const Storage = {
         return logs.slice();
     },
 
+    // Returns the reading that was removed, so the delete can be taken back
     deleteOdometerLog(id) {
         const data = this.getAll();
+        const gone = data.odometerLogs.find(o => o.id === id) || null;
         data.odometerLogs = data.odometerLogs.filter(o => o.id !== id);
+        this.save(data);
+        if (gone) this._readingGone(gone.carId, gone.km);
+        return gone;
+    },
+
+    // The car keeps the highest reading it was ever given, so a mistyped one stayed
+    // the car's mileage after the reading itself was corrected or deleted, and went
+    // on dragging every estimate with it. When the reading that set the car's
+    // mileage goes, the car falls back to the highest one still held.
+    _readingGone(carId, km) {
+        const was = parseInt(km) || 0;
+        if (!was || !carId) return;
+        const data = this.getAll();
+        const car = data.cars.find(c => c.id === carId);
+        if (!car || (parseInt(car.mileage) || 0) !== was) return;
+        const left = this.getOdometerReadings(carId);
+        if (!left.length) return;
+        const top = left.reduce((a, b) => (b.km >= a.km ? b : a));
+        if (top.km === was) return;
+        car.mileage = String(top.km);
+        car.mileageDate = top.date;
         this.save(data);
     },
 
-    // Every known odometer reading for a car (manual, service, fuel), oldest first
+    // Every known odometer reading for a car (manual, service, fuel), oldest first.
+    // Each one names the record it came from, so a wrong one can be found again.
     getOdometerReadings(carId) {
         const out = [];
-        this.getOdometerLogs(carId).forEach(o => out.push({ km: o.km, date: o.date, source: 'manual' }));
-        this.getServices(carId).forEach(s => { const m = parseInt(s.mileage) || 0; if (m > 0 && s.date) out.push({ km: m, date: s.date, source: 'service' }); });
-        this.getFuelLogs(carId).forEach(f => { const m = parseInt(f.odometer) || 0; if (m > 0 && f.date) out.push({ km: m, date: f.date, source: 'fuel' }); });
+        this.getOdometerLogs(carId).forEach(o => out.push({ km: o.km, date: o.date, source: 'manual', id: o.id }));
+        this.getServices(carId).forEach(s => { const m = parseInt(s.mileage) || 0; if (m > 0 && s.date) out.push({ km: m, date: s.date, source: 'service', id: s.id, type: s.type }); });
+        this.getFuelLogs(carId).forEach(f => { const m = parseInt(f.odometer) || 0; if (m > 0 && f.date) out.push({ km: m, date: f.date, source: 'fuel', id: f.id }); });
         return out.sort((a, b) => new Date(a.date) - new Date(b.date) || a.km - b.km);
+    },
+
+    // The odometer on a given day, for a record that was saved without a reading.
+    // Exact when anything was read that day. Otherwise it is worked out from the
+    // readings either side, and only when one of them is close enough to mean
+    // something: `estimated` says which. Null before the first reading ever taken,
+    // or when the nearest one is too far away to say. Nothing here is stored, so an
+    // estimate can never be mistaken for a reading, and it improves by itself as
+    // readings are added around it.
+    KM_NEAR_DAYS: 45,
+    kmOn(carId, date, ignoreId) {
+        if (!carId || !date) return null;
+        const all = this.getOdometerReadings(carId).filter(r => r.id !== ignoreId);
+        const same = all.filter(r => r.date === date);
+        if (same.length) return { km: same[same.length - 1].km, estimated: false };
+        const days = (a, b) => (new Date(b) - new Date(a)) / 86400000;
+        const before = all.filter(r => r.date < date).pop();
+        const after = all.find(r => r.date > date);
+        if (!before) return null;
+        const since = days(before.date, date);
+        if (after) {
+            if (after.km < before.km || Math.min(since, days(date, after.date)) > this.KM_NEAR_DAYS) return null;
+            return { km: Math.round(before.km + (after.km - before.km) * since / days(before.date, after.date)), estimated: true };
+        }
+        const rate = this.getDailyKmRate(carId);
+        if (!rate || since > this.KM_NEAR_DAYS) return null;
+        return { km: Math.round(before.km + rate * since), estimated: true };
+    },
+
+    // Readings that cannot all be true: an odometer never runs backwards. Each
+    // entry is a reading and the later, lower ones that contradict it. One too-high
+    // reading contradicts everything after it, so it is named once rather than once
+    // per later reading; with a single pair there is no telling which of the two is
+    // wrong, and both are handed back. A few km the wrong way round is a reading
+    // typed from memory the next morning, not a mistake worth raising.
+    CONFLICT_KM: 100,
+    getReadingConflicts(carId) {
+        const all = this.getOdometerReadings(carId);
+        const out = [];
+        let top = null;
+        all.forEach(r => {
+            if (top && r.date > top.date && r.km < top.km - this.CONFLICT_KM) {
+                let entry = out.find(c => c.high === top);
+                if (!entry) out.push(entry = { high: top, lower: [] });
+                entry.lower.push(r);
+            } else if (!top || r.km >= top.km) top = r;
+        });
+        return out;
     },
 
     // The most recent confirmed reading (what the user actually saw on the dash)

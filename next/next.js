@@ -54,7 +54,8 @@ const Next = {
         car: '<path d="M4 16v-3l2-5.2A2 2 0 017.9 6.5h8.2a2 2 0 011.9 1.3l2 5.2v3M4 13h16M6.5 16v1.5M17.5 16v1.5M3.5 16h17"/>',
         plus: '<path d="M12 5v14M5 12h14"/>',
         close: '<path d="M6 6l12 12M18 6L6 18"/>',
-        chev: '<path d="M9 5l7 7-7 7"/>'
+        chev: '<path d="M9 5l7 7-7 7"/>',
+        find: '<circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/>'
     },
 
     icon(name, cls) { return `<svg class="ic ${cls || ''}" viewBox="0 0 24 24" aria-hidden="true">${this.ICONS[name]}</svg>`; },
@@ -99,6 +100,7 @@ const Next = {
 
     SCREENS: ['home', 'history', 'car'],
     filter: '',             // History: '' for everything, a job type, or '@accident'
+    query: '',              // History: what is typed in the search box
 
     init() {
         I18N.init();
@@ -149,6 +151,7 @@ const Next = {
     go(name, filter) {
         history.replaceState(null, '', name === 'home' ? location.pathname + location.search : '#' + name);
         this.filter = filter || '';
+        this.query = '';
         this.closeSheet();
         this.render();
         window.scrollTo(0, 0);
@@ -170,7 +173,9 @@ const Next = {
                     type: st.type, status: st.status, days: st.dueDays,
                     km: Number.isFinite(km) ? Math.round(km) : null,
                     kmFirst: st.hasKm && byKm <= byTime,
-                    kmLeft: st.kmRemaining, daysLeft: st.daysRemaining
+                    kmLeft: st.kmRemaining, daysLeft: st.daysRemaining,
+                    // a distance counted from a worked-out reading is said with "about"
+                    est: !!st.kmEstimated, pad: st.measured || null
                 };
             })
             .sort((a, b) => (a.km === null ? Infinity : a.km) - (b.km === null ? Infinity : b.km) || a.days - b.days);
@@ -194,17 +199,49 @@ const Next = {
         return out;
     },
 
+    // "13 days", "3 months": Arabic takes a different form of the noun for 1, 2,
+    // 3 to 10, and 11 and up, so these go through count() like visits and receipts
+    days(n) { return this.count(n, '{n} day', '{n} days'); },
+    months(n) { return this.count(n, '{n} month', '{n} months'); },
+    span(days) {
+        const d = Math.max(0, days);
+        return t('about {v}', { v: d <= 60 ? this.days(d) : this.months(Math.round(d / 30)) });
+    },
+    about(km) { return this.num(Math.round(km / 500) * 500); },
+
     // When a visit falls due, said the way its soonest job is counted
     when(v) {
         const j = v.jobs[0];
+        if (j.pad && (j.pad.basis || j.pad.mm <= j.pad.minMm)) return this.padLine(j);
         if (j.status === 'overdue') {
-            return j.kmFirst && j.kmLeft <= 0
-                ? t('{km} km over', { km: this.num(Math.abs(j.kmLeft)) })
-                : t('{d} days overdue', { d: Math.abs(j.daysLeft) });
+            if (!(j.kmFirst && j.kmLeft <= 0)) return t('{v} overdue', { v: this.days(Math.abs(j.daysLeft)) });
+            return j.est ? t('about {km} km over', { km: this.about(Math.abs(j.kmLeft)) }) : t('{km} km over', { km: this.num(Math.abs(j.kmLeft)) });
         }
-        const d = Math.max(0, j.days);
-        const span = d <= 60 ? t('about {d} days', { d }) : t('about {m} months', { m: Math.round(d / 30) });
-        return j.kmFirst ? t('{km} km', { km: this.num(j.kmLeft) }) + t(', ') + span : span;
+        const span = this.span(j.days);
+        if (!j.kmFirst) return span;
+        return (j.est ? t('about {km} km', { km: this.about(j.kmLeft) }) : t('{km} km', { km: this.num(j.kmLeft) })) + t(', ') + span;
+    },
+
+    // Measured pads are said by what is left of them, then by when that runs out
+    padLine(j) {
+        const mm = j.pad.mm;
+        if (mm <= j.pad.minMm) return t('{mm} mm left, replace now', { mm });
+        if (j.pad.stale) return t('{mm} mm on {d}, measure again', { mm, d: this.day(j.pad.date) });
+        return t('{mm} mm left', { mm }) + t(', ') + this.span(j.days);
+    },
+
+    // What the next visit usually costs, from what the owner has paid before. A job
+    // done with the oil change is not billed; a job never paid for has no price to
+    // go by, and then the figure is a floor, not an estimate.
+    usual(car, jobs) {
+        let sum = 0, missing = 0;
+        jobs.forEach(j => {
+            if ((Recommendations.getEffective(car, j.type) || {}).withOil) return;
+            const avg = Storage.getAverageServiceCost(j.type, car.id);
+            if (avg) sum += avg; else missing += 1;
+        });
+        if (!sum) return '';
+        return t(missing ? 'Usually {v} SAR or more' : 'Usually about {v} SAR', { v: this.num(sum) });
     },
 
     roadHTML(visits) {
@@ -226,8 +263,8 @@ const Next = {
             // A job due by date has no km limit; its place on the road is an estimate
             // at the car's driving rate, so it is rounded and says "about".
             const figure = v.status === 'overdue' ? t('Overdue')
-                : v.jobs[0].kmFirst ? t('{km} km', { km: this.num(v.km) })
-                : t('about {km} km', { km: this.num(Math.round(v.km / 500) * 500) });
+                : v.jobs[0].kmFirst && !v.jobs[0].est ? t('{km} km', { km: this.num(v.km) })
+                : t('about {km} km', { km: this.about(v.km) });
             return `<i class="mark ${v.status}" style="inset-inline-start:${pct.toFixed(1)}%"></i>
                 <div class="lab ${side} ${atEnd ? 'end' : ''} ${v.status}" style="${pos}">${esc(this.join(v.jobs.map(j => this.short(j.type))))}<span>${figure}</span></div>`;
         }).join('');
@@ -249,10 +286,10 @@ const Next = {
         });
     },
 
-    nextHTML(visits) {
+    nextHTML(visits, car) {
         const rows = visits.slice(0, 3).map((v, i) => `
             <button type="button" class="row ${v.status}" data-do="log" data-arg="${esc(v.jobs.map(j => j.type).join('|'))}">
-                <span class="row-main"><strong>${esc(this.join(v.jobs.map(j => this.name(j.type))))}</strong><span>${this.when(v)}</span></span>
+                <span class="row-main"><strong>${esc(this.join(v.jobs.map(j => this.name(j.type))))}</strong><span>${this.when(v)}</span>${i === 0 && this.usual(car, v.jobs) ? `<span class="usual">${this.usual(car, v.jobs)}</span>` : ''}</span>
                 ${i === 0 ? `<span class="log">${t('Log')}</span>` : `<span class="chev">${this.icon('chev', 'flip')}</span>`}
             </button>`).join('');
         return `<section class="card" aria-label="${t('Next up')}">${rows || `<p class="empty">${t('Nothing due soon')}</p>`}</section>`;
@@ -272,7 +309,7 @@ const Next = {
         const anySet = states.some(s => s.st.state !== 'missing');
         let cls = 'ok', text = t('All valid');
         if (expired) { cls = 'overdue'; text = t('{name} expired', { name: expired.name }); }
-        else if (soon) { cls = 'soon'; text = t('{name}: {d} days left', { name: soon.name, d: soon.st.days }); }
+        else if (soon) { cls = 'soon'; text = t('{name}: {v} left', { name: soon.name, v: this.days(soon.st.days) }); }
         else if (!anySet) { cls = ''; text = t('Not set'); }
         return `<button type="button" class="tile" data-go="car"><span>${t('Documents')}</span>
             <strong class="word ${cls}">${text}</strong></button>`;
@@ -293,7 +330,8 @@ const Next = {
         if (!car) {
             app.innerHTML = `<div class="head"><h1 class="title">AutoCare</h1></div>
                 <p class="lede">${t('No car yet.')}</p>
-                <a class="primary" href="classic.html">${t('Add your car')}</a>`;
+                <button type="button" class="primary" data-do="carEdit">${t('Add your car')}</button>
+                <label class="quiet">${t('Restore a backup')}<input type="file" accept=".json,application/json" data-import hidden></label>`;
             return;
         }
         // Auto reminders are a view of the schedule, brought up to date on every draw,
@@ -312,8 +350,16 @@ const Next = {
         const b = Storage.getBackupStatus();
         if (!b.needed) return '';
         const text = b.never ? t('No backup yet. Your records live only on this phone.')
+            : b.newReceipt ? t('A receipt you added is only on this phone.')
             : t('Last backup was {d} days ago, and you have changes since.', { d: b.daysSinceBackup });
         return `<button type="button" class="card nudge" data-do="backup"><span>${text}</span><b>${t('Back up')}</b></button>`;
+    },
+
+    // Readings that cannot all be true make every estimate that leans on them wrong
+    conflictsHTML(car) {
+        const n = Storage.getReadingConflicts(car.id).length;
+        if (!n) return '';
+        return `<button type="button" class="card nudge" data-do="checks"><span>${t(n === 1 ? 'Two odometer readings cannot both be right.' : 'Some odometer readings cannot all be right.')}</span><b>${t('Check')}</b></button>`;
     },
 
     homeHTML(car) {
@@ -327,8 +373,9 @@ const Next = {
             <div class="odo">${proj.km ? this.num(proj.km) : '—'}<small>${t('km')}</small></div>
             <div class="est"><span>${read}</span><button type="button" data-do="odo">${t('Update')}</button></div>
             ${this.roadHTML(visits)}
-            ${this.nextHTML(visits)}
+            ${this.nextHTML(visits, car)}
             <div class="tiles">${this.costTile(car)}${this.docsTile(car)}</div>
+            ${this.conflictsHTML(car)}
             ${this.backupHTML()}`;
     },
 
@@ -360,14 +407,40 @@ const Next = {
     },
 
     matches(s) {
-        return !this.filter || (this.filter === '@accident' ? !!s.accident : s.type === this.filter);
+        if (this.filter && !(this.filter === '@accident' ? !!s.accident : s.type === this.filter)) return false;
+        const words = this.fold(this.query).split(' ').filter(Boolean);
+        if (!words.length) return true;
+        const hay = this.hay(s);
+        return words.every(w => hay.includes(w));
     },
 
-    // With a job picked, each visit shows that job alone: when it was done and what
-    // it cost. The full visit is still one tap away.
+    // Text made comparable: case, Arabic letter variants and marks, and the two
+    // sets of Arabic digits all stop mattering, so "فلتر" finds "فلتر الهواء" and
+    // "٢٠٢٦" finds 2026.
+    fold(text) {
+        return String(text || '').toLowerCase()
+            .replace(/[\u064B-\u0652\u0640]/g, '')
+            .replace(/[أإآ]/g, 'ا').replace(/ة/g, 'ه').replace(/ى/g, 'ي')
+            .replace(/[٠-٩]/g, d => '٠١٢٣٤٥٦٧٨٩'.indexOf(d)).replace(/[۰-۹]/g, d => '۰۱۲۳۴۵۶۷۸۹'.indexOf(d))
+            .replace(/\s+/g, ' ').trim();
+    },
+
+    // Everything about a record a person might search by: what it was in either
+    // language, the note, the shop, the parts on its bills, the day and the reading
+    hay(s) {
+        const bills = (s.bills || []).flatMap(b => [b.label, b.vendor]);
+        const km = parseInt(s.mileage, 10) > 0 ? [String(s.mileage), this.num(parseInt(s.mileage, 10))] : [];
+        const tags = [s.accident && t('Accident'), s.insurancePaid && t('Paid by insurance'), s.checkOnly && t('Checked only')];
+        return this.fold([s.type, this.NAMES[s.type], I18N.dict.ar[s.type], s.notes, ...bills, ...km, ...tags,
+            s.date, this.date(s.date, { day: 'numeric', month: 'long', year: 'numeric' })].filter(Boolean).join(' '));
+    },
+
+    // With a job picked or a search typed, each visit shows what matches alone: when
+    // it was done and what it cost. The full visit is still one tap away.
     shownVisits(car) {
+        const narrowed = this.filter || this.fold(this.query);
         return this.pastVisits(car)
-            .map(v => this.filter ? this.sumVisit(v.date, v.records.filter(s => this.matches(s))) : v)
+            .map(v => narrowed ? this.sumVisit(v.date, v.records.filter(s => this.matches(s))) : v)
             .filter(v => v.records.length);
     },
 
@@ -390,7 +463,9 @@ const Next = {
 
     historyList(car) {
         const years = [];
-        this.shownVisits(car).forEach(v => {
+        const shown = this.shownVisits(car);
+        if (!shown.length) return `<p class="lede none">${t('Nothing matches.')}</p>`;
+        shown.forEach(v => {
             const y = v.date.slice(0, 4);
             const last = years[years.length - 1];
             if (last && last.y === y) last.visits.push(v); else years.push({ y, visits: [v] });
@@ -422,6 +497,7 @@ const Next = {
         const since = this.date(visits[visits.length - 1].date, { month: 'short', year: 'numeric' });
         return `${head}
             <p class="lede">${t('{visits} since {d}', { visits: this.count(visits.length, '{n} visit', '{n} visits'), d: since })}</p>
+            <label class="search">${this.icon('find')}<input type="search" data-q value="${esc(this.query)}" placeholder="${t('Search jobs, notes, shops')}" aria-label="${t('Search')}" enterkeyhint="search" autocomplete="off"></label>
             ${this.chipsHTML(car)}
             <div id="hist-list">${this.historyList(car)}</div>`;
     },
@@ -430,6 +506,13 @@ const Next = {
         this.filter = key;
         document.querySelectorAll('.chip').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.filter === key)));
         document.getElementById('hist-list').innerHTML = this.historyList(Storage.getCars()[0]);
+    },
+
+    // The list follows the typing; the box itself is left alone so the keyboard stays up
+    setQuery(text) {
+        this.query = text;
+        const list = document.getElementById('hist-list');
+        if (list) list.innerHTML = this.historyList(this.car());
     },
 
     // ── One visit, opened as a sheet over the list ──
@@ -571,14 +654,19 @@ const Next = {
             .filter(type => !known.some(k => k.type === type))
             .map(type => Recommendations.getMaintenanceStatus(car, type))
             .filter(Boolean)
-            .map(st => ({ type: st.type, status: 'unknown', line: t('No record yet') }));
+            // pads that were measured but never logged as fitted: say what was measured
+            .map(st => ({ type: st.type, status: 'unknown', line: this.unknownLine(st) }));
         return known.concat(never);
+    },
+
+    unknownLine(st) {
+        return st.measured ? t('{mm} mm on {d}', { mm: st.measured.mm, d: this.date(st.measured.date, { day: 'numeric', month: 'short', year: 'numeric' }) }) : t('No record yet');
     },
 
     every(rec) {
         const parts = [];
         if (rec && rec.km) parts.push(t('{km} km', { km: this.num(rec.km) }));
-        if (rec && rec.months) parts.push(t('{m} months', { m: rec.months }));
+        if (rec && rec.months) parts.push(this.months(rec.months));
         return parts.join(' ' + t('or') + ' ');
     },
 
@@ -586,7 +674,7 @@ const Next = {
         const d = st.date ? this.date(st.date, { day: 'numeric', month: 'short', year: 'numeric' }) : '';
         if (st.state === 'missing') return t('Not set');
         if (st.state === 'expired') return t('Expired on {d}', { d });
-        if (st.state === 'soon') return t('{n} days left, until {d}', { n: st.days, d });
+        if (st.state === 'soon') return t('{v} left, until {d}', { v: this.days(st.days), d });
         return t('Valid until {d}', { d });
     },
 
@@ -606,14 +694,27 @@ const Next = {
         }).join('');
 
         const ty = Storage.getTyreStatus(car);
-        const tyres = ty ? `<section class="card" aria-label="${t('Tyres')}"><h2>${t('Tyres')}</h2>
-            ${fact(t('This set'), esc(ty.detail || '—'))}
-            ${ty.fittedDate ? fact(t('Fitted'), this.date(ty.fittedDate, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}
-            ${ty.kmLeft !== null && ty.kmLeft > 0 ? fact(t('Usual life left'), t('about {km} km', { km: this.num(Math.round(ty.kmLeft / 1000) * 1000) })) : ''}</section>` : '';
+        const set = car.tires || {};
+        const made = Storage.getTyreAge(car);
+        const tyres = `<section class="card" aria-label="${t('Tyres')}"><h2>${t('Tyres')}</h2>
+            ${ty ? fact(t('This set'), esc(ty.detail || '—')) : ''}
+            ${ty && ty.fittedDate ? fact(t('Fitted'), this.date(ty.fittedDate, { day: 'numeric', month: 'short', year: 'numeric' })) : ''}
+            ${ty && ty.kmLeft !== null && ty.kmLeft > 0 ? fact(t('Usual life left'), t('about {km} km', { km: this.num(Math.round(ty.kmLeft / 1000) * 1000) })) : ''}
+            ${made ? fact(t('Made'), this.date(made.madeOn + (made.madeOn.length === 7 ? '-01' : ''), { month: 'short', year: 'numeric' }) + `<small>${t('{y} years old', { y: made.years })}</small>`) : ''}
+            ${row('data-do="tyre"', made && made.status !== 'ok' ? 'soon' : '', t('Tyre details'),
+                made ? ([set.brand, set.size].some(Boolean) ? `<bdi dir="auto">${esc([set.brand, set.size].filter(Boolean).join(' '))}</bdi>` : t('Brand and size')) : t('Add the date they were made, to track their age'))}
+            </section>`;
+
+        const conflicts = Storage.getReadingConflicts(car.id).length;
+        const fuel = Features.getFuelSettings();
+        const fuelLine = fuel.mode === 'consumption' && parseFloat(fuel.lp100) > 0 ? t('{l} L/100 km at {p} SAR a litre', { l: esc(fuel.lp100), p: esc(fuel.price) })
+            : fuel.mode === 'monthly' && parseFloat(fuel.monthly) > 0 ? t('{v} SAR a month', { v: this.num(parseFloat(fuel.monthly)) })
+            : t('Off. Running cost counts maintenance only.');
+        const deleted = Storage.getDeletedServices(car.id).length;
 
         const wars = Storage.getActiveWarranties(car.id).map(w => {
             const left = [];
-            if (w.warranty.daysRemaining !== null && w.warranty.daysRemaining !== undefined) left.push(t('{d} days', { d: w.warranty.daysRemaining }));
+            if (w.warranty.daysRemaining !== null && w.warranty.daysRemaining !== undefined) left.push(this.days(w.warranty.daysRemaining));
             if (w.warranty.kmRemaining !== null && w.warranty.kmRemaining !== undefined) left.push(t('{km} km', { km: this.num(w.warranty.kmRemaining) }));
             return fact(`<span dir="auto">${esc(w.bill.label || this.name(w.bill.serviceType))}</span>`, t('{left} left', { left: left.join(' ' + t('or') + ' ') }));
         }).join('');
@@ -635,14 +736,18 @@ const Next = {
         return `
             <div class="head"><h1 class="title">${esc(car.make)} ${esc(car.model)}</h1></div>
             <p class="lede">${[esc(car.year), proj.km ? t('{km} km', { km: this.num(proj.km) }) : ''].filter(Boolean).join(t(', '))}</p>
+            ${conflicts ? `<section class="card" aria-label="${t('To check')}">${row('data-do="checks"', 'soon', t('Readings to check'),
+                t(conflicts === 1 ? 'Two odometer readings cannot both be right.' : 'Some odometer readings cannot all be right.'))}</section>` : ''}
             <section class="card" aria-label="${t('Schedule')}"><h2>${t('Schedule')}</h2>${sched}</section>
             <section class="card" aria-label="${t('Documents')}"><h2>${t('Documents')}</h2>${docs}</section>
             ${tyres}
             ${wars ? `<section class="card" aria-label="${t('Warranties')}"><h2>${t('Warranties')}</h2>${wars}</section>` : ''}
             <section class="card" aria-label="${t('Costs')}"><h2>${t('Costs')}</h2>
-                ${fact(t('Running cost'), bd ? `${bd.totalPerKm.toFixed(2)} <small>${t('SAR/km')}</small>` : '—')}
+                ${fact(t('Running cost'), bd ? `${bd.totalPerKm.toFixed(2)} <small>${t('SAR/km')}</small>`
+                    + (bd.fuelEstimated ? `<small class="under">${t('maintenance {m}, fuel about {f}', { m: bd.maintPerKm.toFixed(2), f: bd.fuelPerKm.toFixed(2) })}</small>` : '') : '—')}
                 ${fact(t('Paid in {y}', { y: year }), this.money(paid))}
                 ${fact(t('Expected, next 6 months'), t('about {v}', { v: this.money(Math.round(ahead / 50) * 50) }))}
+                ${row('data-do="fuel"', '', t('Fuel estimate'), fuelLine)}
             </section>
             <section class="card" aria-label="${t('Settings')}"><h2>${t('Settings')}</h2>
                 <div class="fact"><span>${t('Language')}</span><div class="seg">${pick('lang', 'en', I18N.lang, 'English')}${pick('lang', 'ar', I18N.lang, 'العربية')}</div></div>
@@ -651,6 +756,9 @@ const Next = {
                 <label class="row"><span class="row-main"><strong>${t('Restore a backup')}</strong><span>${t('Choose a backup file from Files')}</span></span>
                     <span class="chev">${this.icon('chev', 'flip')}</span><input type="file" accept=".json,application/json" data-import hidden></label>
                 ${notif}
+                ${row('data-do="calendar"', '', t('Add to Calendar'), t('Document dates and due dates, with alerts'))}
+                ${row('data-do="carEdit"', '', t('Car details'), `<bdi dir="auto">${esc([car.make, car.model, car.year, car.plate].filter(Boolean).join(' '))}</bdi>`)}
+                ${deleted ? row('data-do="trash"', '', t('Deleted records'), this.count(deleted, '{n} record, kept for 30 days', '{n} records, kept for 30 days')) : ''}
                 <a class="row" href="classic.html"><span class="row-main"><strong>${t('Classic screens')}</strong><span>${t('Car details, fuel log, trip planner, deleted records')}</span></span>
                     <span class="chev">${this.icon('chev', 'flip')}</span></a>
             </section>`;
